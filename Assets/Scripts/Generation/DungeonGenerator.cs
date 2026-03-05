@@ -2,8 +2,10 @@
 // DungeonGenerator.cs — 던전 생성 시스템
 // 위치: Assets/Scripts/Generation/DungeonGenerator.cs
 // ============================================================
-// [v2.1 변경사항]
-//   - PlaceEvents: 균등 랜덤 → 가중치(spawnWeight) 기반 랜덤 선택
+// [v2.2 변경사항]
+//   - objectPool 필드 추가: 오브젝트(보물 상자 등) 배치 풀
+//   - PlaceObjects() 메서드 추가: 가중치 기반 오브젝트 배치
+//     이벤트와 오브젝트는 같은 타일에 중복 배치되지 않음
 // ============================================================
 using System.Collections.Generic;
 using System.Linq;
@@ -18,6 +20,14 @@ public class DungeonGenerator : MonoBehaviour
     [Header("이벤트 에셋 목록")]
     [Tooltip("배치 가능한 이벤트 데이터 목록")]
     public List<DungeonEventData> eventPool = new List<DungeonEventData>();
+
+    [Header("오브젝트 에셋 목록")]
+    [Tooltip("배치 가능한 오브젝트 데이터 목록 (보물 상자 등)")]
+    public List<DungeonObjectData> objectPool = new List<DungeonObjectData>();
+
+    [Tooltip("오브젝트 배치 밀도 (walkable 타일 대비 비율, 0.0~1.0)")]
+    [Range(0f, 0.3f)]
+    public float objectDensity = 0.03f;
 
     private TileData[,] grid;
     private List<RoomData> rooms = new List<RoomData>();
@@ -88,6 +98,7 @@ public class DungeonGenerator : MonoBehaviour
         RecordConnections(finalEdges);
         PlaceStairs(mstEdges);
         PlaceEvents(data.eventDensity);
+        PlaceObjects();
     }
 
     // ═══════════════════════════════════════════════════════
@@ -353,6 +364,79 @@ public class DungeonGenerator : MonoBehaviour
             int j = Random.Range(0, i + 1);
             T temp = list[i]; list[i] = list[j]; list[j] = temp;
         }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // Step 8: 오브젝트 배치 (보물 상자 등)
+    // ═══════════════════════════════════════════════════════
+
+    /// <summary>
+    /// walkable 타일에 오브젝트를 가중치 기반으로 배치한다.
+    /// - START/EXIT 방 타일 제외
+    /// - 이미 이벤트가 배치된 타일 제외 (이벤트와 오브젝트 중복 없음)
+    /// - spawnWeight 0인 오브젝트는 배치 안 됨
+    /// </summary>
+    private void PlaceObjects()
+    {
+        if (objectPool == null || objectPool.Count == 0) return;
+
+        List<DungeonObjectData> validObjects = new List<DungeonObjectData>();
+        List<int> weights   = new List<int>();
+        int totalWeight     = 0;
+
+        foreach (var obj in objectPool)
+        {
+            if (obj != null && obj.spawnWeight > 0)
+            {
+                validObjects.Add(obj);
+                weights.Add(obj.spawnWeight);
+                totalWeight += obj.spawnWeight;
+            }
+        }
+
+        if (validObjects.Count == 0 || totalWeight <= 0) return;
+
+        // 후보 타일: walkable + START/EXIT 아님 + 이벤트 없음
+        List<Vector2Int> candidates = new List<Vector2Int>();
+        for (int x = 0; x < floorData.mapWidth; x++)
+        {
+            for (int y = 0; y < floorData.mapHeight; y++)
+            {
+                TileData t = grid[x, y];
+                if (!t.IsWalkable)     continue;
+                if (t.eventData != null) continue;  // 이벤트 타일 제외
+                int rid = t.roomId;
+                if (rid >= 0 && (rooms[rid].roomType == RoomType.START ||
+                                 rooms[rid].roomType == RoomType.EXIT)) continue;
+                candidates.Add(new Vector2Int(x, y));
+            }
+        }
+
+        int count = Mathf.RoundToInt(candidates.Count * objectDensity);
+        Shuffle(candidates);
+
+        for (int i = 0; i < count && i < candidates.Count; i++)
+        {
+            Vector2Int pos = candidates[i];
+            DungeonObjectData selected = SelectObjectWeightedRandom(validObjects, weights, totalWeight);
+            grid[pos.x, pos.y].placedObject      = selected;
+            grid[pos.x, pos.y].isObjectInteracted = false;
+        }
+
+        Debug.Log($"[DungeonGenerator] 오브젝트 배치 완료: {Mathf.Min(count, candidates.Count)}개");
+    }
+
+    private DungeonObjectData SelectObjectWeightedRandom(
+        List<DungeonObjectData> objects, List<int> weights, int totalWeight)
+    {
+        int roll       = Random.Range(0, totalWeight);
+        int cumulative = 0;
+        for (int i = 0; i < objects.Count; i++)
+        {
+            cumulative += weights[i];
+            if (roll < cumulative) return objects[i];
+        }
+        return objects[objects.Count - 1];
     }
 
     // ═══════════════════════════════════════════════════════

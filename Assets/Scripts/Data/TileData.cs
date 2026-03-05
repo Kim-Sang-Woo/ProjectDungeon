@@ -3,17 +3,12 @@
 // 기획서 Ch.0.3 참조
 // 위치: Assets/Scripts/Data/TileData.cs
 // ============================================================
-// [v2 변경사항]
-//   struct → class 변경
-//   - struct일 때 GetTileData() 반환값 수정이 원본에 반영되지 않는
-//     값 복사 버그를 근본적으로 해결
-//   - 이제 grid[x,y]를 꺼내 수정하면 원본에 바로 반영됨
+// [v3 변경사항]
+//   - placedObject 필드 추가: 타일 위에 배치된 오브젝트 데이터 참조
+//   - isObjectInteracted 필드 추가: 오브젝트 상호작용 완료 여부
+//   - HasObject 프로퍼티 추가: 유효한 오브젝트 존재 여부 간편 확인
 // ============================================================
 
-/// <summary>
-/// 맵의 각 타일 셀에 대한 런타임 데이터.
-/// TileData[,] grid 형태로 DungeonGenerator가 생성하고 DungeonManager가 소유한다.
-/// </summary>
 [System.Serializable]
 public class TileData
 {
@@ -26,17 +21,29 @@ public class TileData
     /// <summary>이 타일에 배치된 이벤트. null이면 이벤트 없음</summary>
     public DungeonEventData eventData;
 
-    /// <summary>이벤트 소진 여부. true면 이미 처리된 이벤트</summary>
+    /// <summary>이벤트 소진 여부</summary>
     public bool isEventConsumed;
 
-    /// <summary>이동 가능 여부 (FLOOR 또는 CORRIDOR)</summary>
+    /// <summary>이 타일에 배치된 오브젝트. null이면 오브젝트 없음</summary>
+    public DungeonObjectData placedObject;
+
+    /// <summary>오브젝트 상호작용 완료 여부 (isOneTime 오브젝트가 사용됨)</summary>
+    public bool isObjectInteracted;
+
+    /// <summary>이동 가능 여부</summary>
     public bool IsWalkable => type == TileType.FLOOR || type == TileType.CORRIDOR;
+
+    /// <summary>상호작용 가능한 오브젝트가 있는지 여부</summary>
+    public bool HasObject => placedObject != null &&
+                             !(placedObject.isOneTime && isObjectInteracted);
 
     public TileData()
     {
-        type = TileType.WALL;
-        roomId = -1;
-        eventData = null;
-        isEventConsumed = false;
+        type              = TileType.WALL;
+        roomId            = -1;
+        eventData         = null;
+        isEventConsumed   = false;
+        placedObject      = null;
+        isObjectInteracted = false;
     }
 }

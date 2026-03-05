@@ -2,19 +2,21 @@
 // MovementSystem.cs — A* 이동 시스템 (8방향 대각선 + 부드러운 이동)
 // 위치: Assets/Scripts/Movement/MovementSystem.cs
 // ============================================================
-// [v3.4] 층 이동 시 입력 잠금 기능 추가
-//   - LockInput() : 클릭 입력 차단 + 이동 즉시 정지
-//   - UnlockInput() : 잠금 해제 (DungeonManager 층 전환 완료 시 호출)
-//   - inputLocked 상태에서는 HandleClickInput(), MoveTo() 모두 무시
+// [v3.5] 전체 수정 사항 통합
+//   - LockInput() / UnlockInput(): 층 이동 시 입력 잠금
+//   - EventSystem.IsPointerOverGameObject(): UI 위 클릭 시 이동 차단
+//   - 이동 중 정지 시 가속(x3) 제거 → 항상 일정 속도로 이동
 // ============================================================
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 public class MovementSystem : MonoBehaviour
 {
     [Header("속도 설정")]
+    [Tooltip("이동 속도 (칸/sec)")]
     public float moveSpeed = 5f;
 
     [Header("참조")]
@@ -25,6 +27,7 @@ public class MovementSystem : MonoBehaviour
     public Vector2Int CurrentTilePosition { get; private set; }
     public bool IsMoving { get; private set; }
 
+    // ─── 입력 잠금 (층 이동 시 StairSystem이 호출) ───
     private bool inputLocked = false;
 
     private List<Vector2Int> currentPath;
@@ -44,6 +47,8 @@ public class MovementSystem : MonoBehaviour
     private const int COST_DIAGONAL = 14;
     private static readonly float SQRT2 = Mathf.Sqrt(2f);
 
+    // ─── 초기화 ───
+
     private void Start()
     {
         mainCamera = Camera.main;
@@ -56,12 +61,20 @@ public class MovementSystem : MonoBehaviour
 
     private void Update() { HandleClickInput(); }
 
+    // ─── 입력 처리 ───
+
     private void HandleClickInput()
     {
+        // 입력 잠금 상태 → 완전 무시
         if (inputLocked) return;
+
         if (!Input.GetMouseButtonDown(0)) return;
         if (mainCamera    == null) return;
         if (dungeonManager == null) return;
+
+        // UI 위에서 클릭한 경우 이동 명령 무시
+        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            return;
 
         if (IsMoving) { stopRequested = true; return; }
 
@@ -147,10 +160,12 @@ public class MovementSystem : MonoBehaviour
         OnTileEntered?.Invoke(CurrentTilePosition);
     }
 
+    // ─── 이동 코루틴 ───
+
     private IEnumerator MoveAlongPath()
     {
-        IsMoving  = true;
-        int idx   = 1;
+        IsMoving = true;
+        int idx  = 1;
 
         while (idx < currentPath.Count)
         {
@@ -178,8 +193,6 @@ public class MovementSystem : MonoBehaviour
             OnTileEntered?.Invoke(CurrentTilePosition);
 
             if (!IsMoving) yield break;
-
-            // 정지 요청이 있으면 현재 타일 도착 후 정지
             if (stopRequested) { stopRequested = false; break; }
             idx++;
         }
