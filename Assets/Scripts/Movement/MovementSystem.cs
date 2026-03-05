@@ -2,7 +2,10 @@
 // MovementSystem.cs — A* 이동 시스템 (8방향 대각선 + 부드러운 이동)
 // 위치: Assets/Scripts/Movement/MovementSystem.cs
 // ============================================================
-// [v3.3] 가속 로직 제거 — 항상 일정한 속도로 이동
+// [v3.4] 층 이동 시 입력 잠금 기능 추가
+//   - LockInput() : 클릭 입력 차단 + 이동 즉시 정지
+//   - UnlockInput() : 잠금 해제 (DungeonManager 층 전환 완료 시 호출)
+//   - inputLocked 상태에서는 HandleClickInput(), MoveTo() 모두 무시
 // ============================================================
 using System;
 using System.Collections;
@@ -12,7 +15,6 @@ using UnityEngine;
 public class MovementSystem : MonoBehaviour
 {
     [Header("속도 설정")]
-    [Tooltip("이동 속도 (칸/sec)")]
     public float moveSpeed = 5f;
 
     [Header("참조")]
@@ -23,12 +25,15 @@ public class MovementSystem : MonoBehaviour
     public Vector2Int CurrentTilePosition { get; private set; }
     public bool IsMoving { get; private set; }
 
+    private bool inputLocked = false;
+
     private List<Vector2Int> currentPath;
     private Coroutine moveCoroutine;
     private Camera mainCamera;
     private bool stopRequested;
 
-    private static readonly Vector2Int[] AllDirections = {
+    private static readonly Vector2Int[] AllDirections =
+    {
         new Vector2Int( 0,  1), new Vector2Int( 0, -1),
         new Vector2Int(-1,  0), new Vector2Int( 1,  0),
         new Vector2Int( 1,  1), new Vector2Int(-1,  1),
@@ -45,7 +50,7 @@ public class MovementSystem : MonoBehaviour
         if (dungeonManager != null)
         {
             CurrentTilePosition = dungeonManager.StartPosition;
-            transform.position = TileToWorld(CurrentTilePosition);
+            transform.position  = TileToWorld(CurrentTilePosition);
         }
     }
 
@@ -53,66 +58,74 @@ public class MovementSystem : MonoBehaviour
 
     private void HandleClickInput()
     {
+        if (inputLocked) return;
         if (!Input.GetMouseButtonDown(0)) return;
-        if (mainCamera == null) return;
+        if (mainCamera    == null) return;
         if (dungeonManager == null) return;
 
         if (IsMoving) { stopRequested = true; return; }
 
-        Vector3 worldPos = mainCamera.ScreenToWorldPoint(Input.mousePosition);
+        Vector3    worldPos   = mainCamera.ScreenToWorldPoint(Input.mousePosition);
         Vector2Int targetTile = WorldToTile(worldPos);
 
-        // 갈 수 없는 곳이면 가장 가까운 walkable 타일을 찾는다
         if (!dungeonManager.IsWalkable(targetTile.x, targetTile.y))
         {
             targetTile = FindNearestWalkable(targetTile);
-            if (targetTile.x == -1) return; // 주변에 walkable 없음
+            if (targetTile.x == -1) return;
         }
 
         if (targetTile == CurrentTilePosition) return;
-
         MoveTo(targetTile);
     }
 
+    // ─── 입력 잠금 API ───
+
     /// <summary>
-    /// 클릭한 지점에서 BFS로 가장 가까운 walkable 타일을 찾는다.
-    /// 최대 탐색 반경을 제한하여 성능을 보호한다.
+    /// 클릭 입력을 잠그고 현재 이동을 즉시 정지한다.
+    /// StairSystem이 층 이동 처리 직전에 호출한다.
     /// </summary>
+    public void LockInput()
+    {
+        inputLocked = true;
+        StopMovement();
+        Debug.Log("[MovementSystem] 입력 잠금");
+    }
+
+    /// <summary>
+    /// 클릭 입력 잠금을 해제한다.
+    /// DungeonManager가 층 전환 완료 후 자동 호출한다.
+    /// </summary>
+    public void UnlockInput()
+    {
+        inputLocked = false;
+        Debug.Log("[MovementSystem] 입력 잠금 해제");
+    }
+
+    // ─── 이동 API ───
+
     private Vector2Int FindNearestWalkable(Vector2Int origin)
     {
-        const int MAX_SEARCH_RADIUS = 10;
-
-        // Chebyshev 거리 순으로 탐색 (가까운 것부터)
-        for (int radius = 1; radius <= MAX_SEARCH_RADIUS; radius++)
-        {
-            // 현재 반경의 사각형 테두리를 순회
-            for (int dx = -radius; dx <= radius; dx++)
-            {
-                for (int dy = -radius; dy <= radius; dy++)
+        const int MAX = 10;
+        for (int r = 1; r <= MAX; r++)
+            for (int dx = -r; dx <= r; dx++)
+                for (int dy = -r; dy <= r; dy++)
                 {
-                    // 테두리만 (이전 반경은 이미 탐색함)
-                    if (Mathf.Abs(dx) != radius && Mathf.Abs(dy) != radius)
-                        continue;
-
-                    int nx = origin.x + dx;
-                    int ny = origin.y + dy;
-
-                    if (dungeonManager.IsWalkable(nx, ny))
-                        return new Vector2Int(nx, ny);
+                    if (Mathf.Abs(dx) != r && Mathf.Abs(dy) != r) continue;
+                    int nx = origin.x + dx, ny = origin.y + dy;
+                    if (dungeonManager.IsWalkable(nx, ny)) return new Vector2Int(nx, ny);
                 }
-            }
-        }
-
-        return new Vector2Int(-1, -1); // 못 찾음
+        return new Vector2Int(-1, -1);
     }
 
     public void MoveTo(Vector2Int target)
     {
-        if (IsMoving) return;
+        if (IsMoving)    return;
+        if (inputLocked) return;
+
         List<Vector2Int> path = FindPath(CurrentTilePosition, target);
         if (path == null || path.Count < 2) return;
 
-        currentPath = path;
+        currentPath   = path;
         stopRequested = false;
         moveCoroutine = StartCoroutine(MoveAlongPath());
     }
@@ -120,8 +133,8 @@ public class MovementSystem : MonoBehaviour
     public void StopMovement()
     {
         if (moveCoroutine != null) { StopCoroutine(moveCoroutine); moveCoroutine = null; }
-        IsMoving = false;
-        currentPath = null;
+        IsMoving      = false;
+        currentPath   = null;
         stopRequested = false;
         transform.position = TileToWorld(CurrentTilePosition);
     }
@@ -130,52 +143,49 @@ public class MovementSystem : MonoBehaviour
     {
         StopMovement();
         CurrentTilePosition = tilePos;
-        transform.position = TileToWorld(tilePos);
+        transform.position  = TileToWorld(tilePos);
         OnTileEntered?.Invoke(CurrentTilePosition);
     }
 
     private IEnumerator MoveAlongPath()
     {
-        IsMoving = true;
-        int pathIndex = 1;
+        IsMoving  = true;
+        int idx   = 1;
 
-        while (pathIndex < currentPath.Count)
+        while (idx < currentPath.Count)
         {
             if (stopRequested) { stopRequested = false; break; }
 
-            Vector2Int prevTile = currentPath[pathIndex - 1];
-            Vector2Int nextTile = currentPath[pathIndex];
-            Vector3 startPos = TileToWorld(prevTile);
-            Vector3 endPos = TileToWorld(nextTile);
-
-            Vector2Int delta = nextTile - prevTile;
-            bool isDiag = (delta.x != 0 && delta.y != 0);
-            float tileDist = isDiag ? SQRT2 : 1f;
+            Vector2Int prev  = currentPath[idx - 1];
+            Vector2Int next  = currentPath[idx];
+            Vector3    sPos  = TileToWorld(prev);
+            Vector3    ePos  = TileToWorld(next);
+            bool       diag  = (next.x - prev.x != 0 && next.y - prev.y != 0);
+            float      dist  = diag ? SQRT2 : 1f;
 
             float progress = 0f;
-            bool stoppingThisTile = false;
 
             while (progress < 1f)
             {
-                if (stopRequested && !stoppingThisTile) stoppingThisTile = true;
-                float speed = stoppingThisTile ? (moveSpeed * 3f) : moveSpeed;
-                progress += (speed / tileDist) * Time.deltaTime;
-                progress = Mathf.Min(progress, 1f);
-                transform.position = Vector3.Lerp(startPos, endPos, progress);
+                progress += (moveSpeed / dist) * Time.deltaTime;
+                progress  = Mathf.Min(progress, 1f);
+                transform.position = Vector3.Lerp(sPos, ePos, progress);
                 yield return null;
             }
 
-            CurrentTilePosition = nextTile;
-            transform.position = endPos;
+            CurrentTilePosition = next;
+            transform.position  = ePos;
             OnTileEntered?.Invoke(CurrentTilePosition);
 
             if (!IsMoving) yield break;
-            if (stoppingThisTile || stopRequested) { stopRequested = false; break; }
-            pathIndex++;
+
+            // 정지 요청이 있으면 현재 타일 도착 후 정지
+            if (stopRequested) { stopRequested = false; break; }
+            idx++;
         }
 
-        IsMoving = false;
-        currentPath = null;
+        IsMoving      = false;
+        currentPath   = null;
         stopRequested = false;
     }
 
@@ -187,51 +197,49 @@ public class MovementSystem : MonoBehaviour
     {
         if (dungeonManager == null) return null;
 
-        var openList = new List<AStarNode>();
-        var closedSet = new HashSet<Vector2Int>();
-        var cameFrom = new Dictionary<Vector2Int, Vector2Int>();
-        var gScore = new Dictionary<Vector2Int, int>();
+        var open   = new List<AStarNode>();
+        var closed = new HashSet<Vector2Int>();
+        var from   = new Dictionary<Vector2Int, Vector2Int>();
+        var g      = new Dictionary<Vector2Int, int>();
 
-        gScore[start] = 0;
-        openList.Add(new AStarNode(start, 0, Heuristic(start, end)));
+        g[start] = 0;
+        open.Add(new AStarNode(start, 0, Heuristic(start, end)));
 
-        while (openList.Count > 0)
+        while (open.Count > 0)
         {
-            int bestIdx = 0;
-            for (int i = 1; i < openList.Count; i++)
-                if (openList[i].fScore < openList[bestIdx].fScore ||
-                    (openList[i].fScore == openList[bestIdx].fScore && openList[i].gScore < openList[bestIdx].gScore))
-                    bestIdx = i;
+            int bi = 0;
+            for (int i = 1; i < open.Count; i++)
+                if (open[i].fScore < open[bi].fScore ||
+                   (open[i].fScore == open[bi].fScore && open[i].gScore < open[bi].gScore))
+                    bi = i;
 
-            AStarNode current = openList[bestIdx];
-            openList.RemoveAt(bestIdx);
+            AStarNode cur = open[bi];
+            open.RemoveAt(bi);
 
-            if (closedSet.Contains(current.position)) continue;
-            if (current.position == end) return ReconstructPath(cameFrom, end, start);
-            closedSet.Add(current.position);
+            if (closed.Contains(cur.position)) continue;
+            if (cur.position == end) return Reconstruct(from, end, start);
+            closed.Add(cur.position);
 
             foreach (var dir in AllDirections)
             {
-                Vector2Int nb = current.position + dir;
-                if (closedSet.Contains(nb)) continue;
+                Vector2Int nb = cur.position + dir;
+                if (closed.Contains(nb)) continue;
                 if (!dungeonManager.IsWalkable(nb.x, nb.y)) continue;
 
-                bool isDiag = (dir.x != 0 && dir.y != 0);
-                if (isDiag)
-                {
-                    if (!dungeonManager.IsWalkable(current.position.x + dir.x, current.position.y) ||
-                        !dungeonManager.IsWalkable(current.position.x, current.position.y + dir.y))
-                        continue;
-                }
+                bool isDiag = dir.x != 0 && dir.y != 0;
+                if (isDiag &&
+                   (!dungeonManager.IsWalkable(cur.position.x + dir.x, cur.position.y) ||
+                    !dungeonManager.IsWalkable(cur.position.x, cur.position.y + dir.y)))
+                    continue;
 
-                int cost = isDiag ? COST_DIAGONAL : COST_STRAIGHT;
-                int tentG = gScore[current.position] + cost;
+                int cost  = isDiag ? COST_DIAGONAL : COST_STRAIGHT;
+                int tentG = g[cur.position] + cost;
 
-                if (!gScore.ContainsKey(nb) || tentG < gScore[nb])
+                if (!g.ContainsKey(nb) || tentG < g[nb])
                 {
-                    cameFrom[nb] = current.position;
-                    gScore[nb] = tentG;
-                    openList.Add(new AStarNode(nb, tentG, tentG + Heuristic(nb, end)));
+                    from[nb] = cur.position;
+                    g[nb]    = tentG;
+                    open.Add(new AStarNode(nb, tentG, tentG + Heuristic(nb, end)));
                 }
             }
         }
@@ -244,10 +252,10 @@ public class MovementSystem : MonoBehaviour
         return COST_STRAIGHT * Mathf.Max(dx, dy) + (COST_DIAGONAL - COST_STRAIGHT) * Mathf.Min(dx, dy);
     }
 
-    private List<Vector2Int> ReconstructPath(Dictionary<Vector2Int, Vector2Int> cameFrom, Vector2Int cur, Vector2Int start)
+    private List<Vector2Int> Reconstruct(Dictionary<Vector2Int, Vector2Int> from, Vector2Int cur, Vector2Int start)
     {
         var path = new List<Vector2Int> { cur };
-        while (cur != start) { cur = cameFrom[cur]; path.Add(cur); }
+        while (cur != start) { cur = from[cur]; path.Add(cur); }
         path.Reverse();
         return path;
     }
@@ -258,6 +266,6 @@ public class MovementSystem : MonoBehaviour
         public AStarNode(Vector2Int p, int g, int f) { position = p; gScore = g; fScore = f; }
     }
 
-    private Vector3 TileToWorld(Vector2Int p) => new Vector3(p.x + 0.5f, p.y + 0.5f, 0f);
-    private Vector2Int WorldToTile(Vector3 p) => new Vector2Int(Mathf.FloorToInt(p.x), Mathf.FloorToInt(p.y));
+    private Vector3    TileToWorld(Vector2Int p) => new Vector3(p.x + 0.5f, p.y + 0.5f, 0f);
+    private Vector2Int WorldToTile(Vector3 p)    => new Vector2Int(Mathf.FloorToInt(p.x), Mathf.FloorToInt(p.y));
 }

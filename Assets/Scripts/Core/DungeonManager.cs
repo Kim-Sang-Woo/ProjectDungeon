@@ -2,11 +2,12 @@
 // DungeonManager.cs — 런타임 던전 데이터 관리자 (다중 층 지원)
 // 위치: Assets/Scripts/Core/DungeonManager.cs
 // ============================================================
-// [v3 변경사항]
-//   - 다중 층 관리: 방문한 층의 데이터를 캐싱하여 왕래 가능
-//   - GoToNextFloor() / GoToPreviousFloor() 층 이동 API
-//   - 층 이동 시 FogOfWar, GridOverlay, MovementSystem 등 재초기화
-//   - OnFloorChanged 이벤트로 외부 시스템에 층 변경 통보
+// [v3.1 변경사항]
+//   - 층 이동 완료 후 movementSystem.UnlockInput() 호출 추가
+//     : StairSystem이 층 이동 전 LockInput()으로 잠근 입력을
+//       GenerateAndLoadFloor() 완료 시점에 해제한다
+//   - OnFloorChanged 이벤트 발신 순서를 플레이어 배치 이후로 유지
+//     : FogOfWar, GridOverlay 등 구독자가 올바른 플레이어 위치를 참조하도록
 // ============================================================
 using System;
 using System.Collections.Generic;
@@ -37,36 +38,30 @@ public class DungeonManager : MonoBehaviour
     public Vector2Int ExitPosition { get; private set; }
     public DungeonFloorData FloorData => dungeonGenerator != null ? dungeonGenerator.floorData : null;
 
-    public int MapWidth => FloorData != null ? FloorData.mapWidth : 0;
+    public int MapWidth  => FloorData != null ? FloorData.mapWidth  : 0;
     public int MapHeight => FloorData != null ? FloorData.mapHeight : 0;
 
     // ─── 층 관리 ───
-    /// <summary>현재 층 번호 (0부터 시작)</summary>
     public int CurrentFloorIndex { get; private set; } = 0;
 
-    /// <summary>층 변경 시 발생하는 이벤트</summary>
     public event Action<int> OnFloorChanged;
 
-    // 방문한 층 데이터 캐시
     private Dictionary<int, FloorCache> floorCacheMap = new Dictionary<int, FloorCache>();
 
-    /// <summary>한 층의 전체 데이터를 저장하는 캐시</summary>
     private class FloorCache
     {
-        public TileData[,] grid;
+        public TileData[,]   grid;
         public List<RoomData> rooms;
-        public Vector2Int startPosition;
-        public Vector2Int exitPosition;
+        public Vector2Int    startPosition;
+        public Vector2Int    exitPosition;
     }
 
     // ─── 초기화 ───
 
     private void Awake()
     {
-        if (dungeonGenerator == null)
-            dungeonGenerator = GetComponent<DungeonGenerator>();
-        if (dungeonRenderer == null)
-            dungeonRenderer = GetComponent<DungeonRenderer>();
+        if (dungeonGenerator == null) dungeonGenerator = GetComponent<DungeonGenerator>();
+        if (dungeonRenderer  == null) dungeonRenderer  = GetComponent<DungeonRenderer>();
     }
 
     private void Start()
@@ -79,27 +74,23 @@ public class DungeonManager : MonoBehaviour
 
     /// <summary>
     /// 지정 층을 생성(또는 캐시에서 로드)하고 렌더링한다.
+    /// 완료 후 movementSystem.UnlockInput()을 호출하여 입력 잠금을 해제한다.
     /// </summary>
-    /// <param name="floorIndex">층 번호</param>
-    /// <param name="spawnAtStart">true=시작계단 배치, false=출구계단 배치(위층에서 내려온 경우)</param>
     private void GenerateAndLoadFloor(int floorIndex, bool spawnAtStart)
     {
         CurrentFloorIndex = floorIndex;
 
         if (floorCacheMap.ContainsKey(floorIndex))
         {
-            // 캐시에서 로드
             FloorCache cache = floorCacheMap[floorIndex];
-            Grid = cache.grid;
-            Rooms = cache.rooms;
+            Grid          = cache.grid;
+            Rooms         = cache.rooms;
             StartPosition = cache.startPosition;
-            ExitPosition = cache.exitPosition;
-
+            ExitPosition  = cache.exitPosition;
             Debug.Log($"[DungeonManager] {floorIndex}층 캐시에서 로드. 방 수: {Rooms.Count}");
         }
         else
         {
-            // 새로 생성
             if (dungeonGenerator == null)
             {
                 Debug.LogError("[DungeonManager] DungeonGenerator 참조가 설정되지 않았습니다!");
@@ -107,10 +98,10 @@ public class DungeonManager : MonoBehaviour
             }
 
             bool success = dungeonGenerator.GenerateAndReturn(
-                out TileData[,] grid,
+                out TileData[,]    grid,
                 out List<RoomData> rooms,
-                out Vector2Int startPos,
-                out Vector2Int exitPos
+                out Vector2Int     startPos,
+                out Vector2Int     exitPos
             );
 
             if (!success)
@@ -119,18 +110,17 @@ public class DungeonManager : MonoBehaviour
                 return;
             }
 
-            Grid = grid;
-            Rooms = rooms;
+            Grid          = grid;
+            Rooms         = rooms;
             StartPosition = startPos;
-            ExitPosition = exitPos;
+            ExitPosition  = exitPos;
 
-            // 캐시에 저장
             floorCacheMap[floorIndex] = new FloorCache
             {
-                grid = grid,
-                rooms = rooms,
+                grid          = grid,
+                rooms         = rooms,
                 startPosition = startPos,
-                exitPosition = exitPos
+                exitPosition  = exitPos
             };
 
             Debug.Log($"[DungeonManager] {floorIndex}층 신규 생성. 방 수: {Rooms.Count}");
@@ -148,48 +138,45 @@ public class DungeonManager : MonoBehaviour
             movementSystem.SetPosition(spawnPos);
         }
 
-        // 층 변경 이벤트 발신
+        // 층 변경 이벤트 발신 (FogOfWar, GridOverlay 등 구독자가 처리)
         OnFloorChanged?.Invoke(CurrentFloorIndex);
 
-        Debug.Log($"[DungeonManager] {floorIndex}층 로드 완료. 시작: {StartPosition}, 출구: {ExitPosition}, 배치: {spawnPos}");
+        // ── 핵심 수정: 층 이동 완료 후 입력 잠금 해제 ──
+        // StairSystem이 층 이동 전에 LockInput()을 호출했으므로
+        // 모든 처리가 끝난 이 시점에 해제한다.
+        // Start() 최초 호출 시에는 잠금이 없으므로 호출해도 무해하다.
+        if (movementSystem != null)
+            movementSystem.UnlockInput();
+
+        Debug.Log($"[DungeonManager] {floorIndex}층 로드 완료. 시작:{StartPosition} 출구:{ExitPosition} 배치:{spawnPos}");
     }
 
     // ─── 층 이동 API ───
 
-    /// <summary>
-    /// 다음 층(아래층)으로 이동한다.
-    /// 내려가는 계단에서 호출된다.
-    /// </summary>
     public void GoToNextFloor()
     {
         Debug.Log($"[DungeonManager] {CurrentFloorIndex}층 → {CurrentFloorIndex + 1}층 이동");
         GenerateAndLoadFloor(CurrentFloorIndex + 1, true);
     }
 
-    /// <summary>
-    /// 이전 층(위층)으로 이동한다.
-    /// 올라가는 계단에서 호출된다.
-    /// 0층보다 위로는 갈 수 없다.
-    /// </summary>
     public void GoToPreviousFloor()
     {
         if (CurrentFloorIndex <= 0)
         {
-            Debug.Log("[DungeonManager] 이미 최상위 층입니다. 이전 층이 없습니다.");
+            Debug.Log("[DungeonManager] 이미 최상위 층입니다.");
+            // 잠금이 걸려있을 수 있으므로 여기서도 해제
+            if (movementSystem != null) movementSystem.UnlockInput();
             return;
         }
 
         Debug.Log($"[DungeonManager] {CurrentFloorIndex}층 → {CurrentFloorIndex - 1}층 이동");
-        // 이전 층의 출구계단(=내려가는 계단) 위치에 배치
         GenerateAndLoadFloor(CurrentFloorIndex - 1, false);
     }
 
     // ─── 공용 API ───
 
-    public bool IsInBounds(int x, int y)
-    {
-        return x >= 0 && x < MapWidth && y >= 0 && y < MapHeight;
-    }
+    public bool IsInBounds(int x, int y) =>
+        x >= 0 && x < MapWidth && y >= 0 && y < MapHeight;
 
     public bool IsWalkable(int x, int y)
     {
@@ -197,13 +184,7 @@ public class DungeonManager : MonoBehaviour
         return Grid[x, y].IsWalkable;
     }
 
-    public TileData GetTile(int x, int y)
-    {
-        return Grid[x, y];
-    }
+    public TileData GetTile(int x, int y) => Grid[x, y];
 
-    public void SetTile(int x, int y, TileData data)
-    {
-        Grid[x, y] = data;
-    }
+    public void SetTile(int x, int y, TileData data) => Grid[x, y] = data;
 }
