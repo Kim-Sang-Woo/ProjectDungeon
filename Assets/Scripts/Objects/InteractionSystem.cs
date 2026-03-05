@@ -2,18 +2,10 @@
 // InteractionSystem.cs — 오브젝트 인터렉션 시스템
 // 위치: Assets/Scripts/Objects/InteractionSystem.cs
 // ============================================================
-// [v1.4 변경사항]
-//   - ShowInteraction() 콜백을 Action → Action<string>으로 변경
-//     actionId를 받아 처리 분기
-//   - objectType 기반 switch → actionId 기반 switch로 변경
-//     DungeonObjectData.actions에서 정의한 actionId로 동작 결정
-//
-// [표준 actionId 목록]
-//   "open"     — 보물 상자 열기
-//   "go_down"  — 내려가는 계단
-//   "go_up"    — 올라가는 계단
-//   "ignore"   — 아무것도 하지 않고 UI 닫기
-//   (새 액션 추가 시 HandleAction() switch에 case 추가)
+// [v1.5 변경사항]
+//   - HandleOpen(): AddItemResult로 획득 결과 분기
+//   - 획득 성공/실패/감속 발생 시 FloatingTextUI 호출
+//   - 감속 최초 발생 감지: 획득 전후 IsOverweightSlow 비교
 // ============================================================
 using UnityEngine;
 
@@ -90,7 +82,6 @@ public class InteractionSystem : MonoBehaviour
     {
         if (interactionUI == null) return;
 
-        // actionId를 받아 처리하는 콜백 전달
         interactionUI.ShowInteraction(
             tile.placedObject,
             (actionId) => HandleAction(tilePos, actionId)
@@ -99,33 +90,14 @@ public class InteractionSystem : MonoBehaviour
 
     // ─── actionId 기반 처리 분기 ───
 
-    /// <summary>
-    /// 액션 링크 클릭 시 actionId로 동작을 결정한다.
-    /// 새 actionId 추가 시 case를 추가한다.
-    /// </summary>
     private void HandleAction(Vector2Int tilePos, string actionId)
     {
-        Debug.Log($"[InteractionSystem] 액션 실행 — tilePos:{tilePos} actionId:{actionId}");
-
         switch (actionId)
         {
-            case "open":
-                HandleOpen(tilePos);
-                break;
-
-            case "go_down":
-                HandleGoDown();
-                break;
-
-            case "go_up":
-                HandleGoUp();
-                break;
-
-            case "ignore":
-                // 아무것도 하지 않음 — UI는 ShowInteraction 콜백에서 이미 Hide() 호출됨
-                Debug.Log("[InteractionSystem] 내버려 두기 — 아무 행동 없음");
-                break;
-
+            case "open":     HandleOpen(tilePos);  break;
+            case "go_down":  HandleGoDown();        break;
+            case "go_up":    HandleGoUp();          break;
+            case "ignore":                          break;
             default:
                 Debug.LogWarning($"[InteractionSystem] 처리되지 않은 actionId: '{actionId}'");
                 break;
@@ -140,30 +112,62 @@ public class InteractionSystem : MonoBehaviour
         if (tile.placedObject == null) return;
 
         DungeonObjectData data = tile.placedObject;
-        Debug.Log($"[InteractionSystem] 열기 — {data.displayName}");
+        if (data.rewardItems == null || Inventory.Instance == null) return;
 
+        // ── 1단계: 획득 가능 여부를 먼저 검사 ──
+        // 모든 아이템이 획득 가능한지 사전 확인
+        for (int i = 0; i < data.rewardItems.Length; i++)
+        {
+            ItemData item = data.rewardItems[i];
+            if (item == null) continue;
+
+            int qty = (data.rewardQuantities != null && i < data.rewardQuantities.Length)
+                ? Mathf.Max(1, data.rewardQuantities[i])
+                : 1;
+
+            // 슬롯 초과 사전 체크
+            bool needsNewSlot = !item.isStackable ||
+                                !Inventory.Instance.Slots.Exists(
+                                    s => s.item.itemId == item.itemId &&
+                                         s.quantity < item.maxStack);
+            if (needsNewSlot && Inventory.Instance.Slots.Count >= Inventory.Instance.maxItemCount)
+            {
+                FloatingTextUI.Instance?.ShowNoSpace();
+                return; // 보물상자 소모 없이 취소
+            }
+
+            // 무게 초과 사전 체크
+            if (Inventory.Instance.CurrentWeight + item.weight * qty > Inventory.Instance.maxWeight)
+            {
+                FloatingTextUI.Instance?.ShowTooHeavy();
+                return; // 보물상자 소모 없이 취소
+            }
+        }
+
+        // ── 2단계: 모든 아이템 획득 가능 확인 후 보물상자 소모 ──
         tile.isObjectInteracted = true;
-
         if (data.isOneTime && dungeonObjectSpawner != null)
             dungeonObjectSpawner.RemoveAt(tilePos);
 
-        // 보상 아이템 지급
-        if (data.rewardItems != null && Inventory.Instance != null)
+        // ── 3단계: 아이템 지급 및 연출 ──
+        for (int i = 0; i < data.rewardItems.Length; i++)
         {
-            for (int i = 0; i < data.rewardItems.Length; i++)
+            ItemData item = data.rewardItems[i];
+            if (item == null) continue;
+
+            int qty = (data.rewardQuantities != null && i < data.rewardQuantities.Length)
+                ? Mathf.Max(1, data.rewardQuantities[i])
+                : 1;
+
+            bool wasSlowBefore   = Inventory.Instance.IsOverweightSlow;
+            AddItemResult result = Inventory.Instance.AddItem(item, qty);
+
+            if (result == AddItemResult.Success)
             {
-                ItemData item = data.rewardItems[i];
-                if (item == null) continue;
+                FloatingTextUI.Instance?.ShowAcquire(item.itemName, qty);
 
-                int qty = (data.rewardQuantities != null && i < data.rewardQuantities.Length)
-                    ? Mathf.Max(1, data.rewardQuantities[i])
-                    : 1;
-
-                bool added = Inventory.Instance.AddItem(item, qty);
-                if (added)
-                    Debug.Log($"[InteractionSystem] 아이템 획득: {item.itemName} x{qty}");
-                else
-                    Debug.Log($"[InteractionSystem] 인벤토리 가득 참 — {item.itemName} 획득 실패");
+                if (!wasSlowBefore && Inventory.Instance.IsOverweightSlow)
+                    FloatingTextUI.Instance?.ShowSlowDown();
             }
         }
     }
