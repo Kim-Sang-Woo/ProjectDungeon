@@ -65,6 +65,13 @@ public class DungeonObjectData : ScriptableObject
     [Min(0)]
     public int spawnWeight = 5;
 
+    [Header("보상 아이템 (보물 상자 등)")]
+    [Tooltip("상호작용 시 지급할 아이템 목록")]
+    public ItemData[] rewardItems;
+
+    [Tooltip("각 아이템의 지급 수량 (rewardItems와 같은 인덱스)")]
+    public int[] rewardQuantities;
+
     [Header("액션 목록")]
     [Tooltip("인터렉션 UI에 표시할 액션 목록. 순서대로 표시된다.")]
     public ObjectAction[] actions;

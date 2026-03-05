@@ -139,14 +139,33 @@ public class InteractionSystem : MonoBehaviour
         TileData tile = dungeonManager.GetTile(tilePos.x, tilePos.y);
         if (tile.placedObject == null) return;
 
-        Debug.Log($"[InteractionSystem] 열기 — {tile.placedObject.displayName}");
+        DungeonObjectData data = tile.placedObject;
+        Debug.Log($"[InteractionSystem] 열기 — {data.displayName}");
 
         tile.isObjectInteracted = true;
 
-        if (tile.placedObject.isOneTime && dungeonObjectSpawner != null)
+        if (data.isOneTime && dungeonObjectSpawner != null)
             dungeonObjectSpawner.RemoveAt(tilePos);
 
-        // TODO: 보상 처리
+        // 보상 아이템 지급
+        if (data.rewardItems != null && Inventory.Instance != null)
+        {
+            for (int i = 0; i < data.rewardItems.Length; i++)
+            {
+                ItemData item = data.rewardItems[i];
+                if (item == null) continue;
+
+                int qty = (data.rewardQuantities != null && i < data.rewardQuantities.Length)
+                    ? Mathf.Max(1, data.rewardQuantities[i])
+                    : 1;
+
+                bool added = Inventory.Instance.AddItem(item, qty);
+                if (added)
+                    Debug.Log($"[InteractionSystem] 아이템 획득: {item.itemName} x{qty}");
+                else
+                    Debug.Log($"[InteractionSystem] 인벤토리 가득 참 — {item.itemName} 획득 실패");
+            }
+        }
     }
 
     private void HandleGoDown()
