@@ -1,13 +1,10 @@
 // ============================================================
 // MovementSystem.cs — A* 이동 시스템 (8방향 대각선 + 부드러운 이동)
-// 기획서 Ch.2 참조
 // 위치: Assets/Scripts/Movement/MovementSystem.cs
 // ============================================================
-// [v3.1 변경사항]
-//   - 이동 중 클릭 시 즉시 정지 (새 이동 명령 수행하지 않음)
-//   - 완전히 정지된 후에만 새 이동 명령을 수락
-//   - pendingPath 로직 완전 제거 (빠른 클릭 시 텔레포트 버그 원인)
-//   - 정지 요청 시 현재 보간 중인 다음 타일까지 이동 완료 후 정지
+// [v3.2 변경사항]
+//   - SetPosition() 메서드 추가: 층 이동 시 플레이어 강제 배치용
+//   - 기존 v3.1의 이동/정지 로직은 그대로 유지
 // ============================================================
 using System;
 using System.Collections;
@@ -38,8 +35,6 @@ public class MovementSystem : MonoBehaviour
     private List<Vector2Int> currentPath;
     private Coroutine moveCoroutine;
     private Camera mainCamera;
-
-    // 이동 중 정지 요청 플래그
     private bool stopRequested;
 
     // ─── 8방향 정의 ───
@@ -84,7 +79,6 @@ public class MovementSystem : MonoBehaviour
         if (!Input.GetMouseButtonDown(0)) return;
         if (mainCamera == null) return;
 
-        // ─── 이동 중이면 정지 요청만 하고 새 명령은 무시 ───
         if (IsMoving)
         {
             stopRequested = true;
@@ -97,6 +91,7 @@ public class MovementSystem : MonoBehaviour
         if (dungeonManager == null || !dungeonManager.IsWalkable(targetTile.x, targetTile.y))
             return;
 
+        // 현재 위치 클릭은 MoveTo에서 처리하지 않음 (StairSystem이 처리)
         if (targetTile == CurrentTilePosition)
             return;
 
@@ -105,10 +100,6 @@ public class MovementSystem : MonoBehaviour
 
     // ─── 공용 메서드 ───
 
-    /// <summary>
-    /// 목적지로 A* 경로를 계산하고 자동 이동을 시작한다.
-    /// 이동 중에는 무시된다. 완전 정지 후에만 동작한다.
-    /// </summary>
     public void MoveTo(Vector2Int target)
     {
         if (IsMoving) return;
@@ -126,10 +117,6 @@ public class MovementSystem : MonoBehaviour
         moveCoroutine = StartCoroutine(MoveAlongPath());
     }
 
-    /// <summary>
-    /// 이벤트 발생 시 호출되는 즉시 정지.
-    /// 코루틴을 강제 중단하고 현재 논리 타일 위치로 스냅한다.
-    /// </summary>
     public void StopMovement()
     {
         if (moveCoroutine != null)
@@ -144,6 +131,22 @@ public class MovementSystem : MonoBehaviour
         transform.position = TileToWorld(CurrentTilePosition);
     }
 
+    /// <summary>
+    /// 플레이어를 지정 타일로 강제 배치한다.
+    /// 층 이동 시 DungeonManager가 호출한다.
+    /// </summary>
+    public void SetPosition(Vector2Int tilePos)
+    {
+        StopMovement();
+        CurrentTilePosition = tilePos;
+        transform.position = TileToWorld(tilePos);
+
+        // 배치 후 타일 진입 이벤트 발신 (FogOfWar 갱신 등)
+        OnTileEntered?.Invoke(CurrentTilePosition);
+
+        Debug.Log($"[MovementSystem] 플레이어 강제 배치: {tilePos}");
+    }
+
     // ─── 이동 코루틴 ───
 
     private IEnumerator MoveAlongPath()
@@ -153,7 +156,6 @@ public class MovementSystem : MonoBehaviour
 
         while (pathIndex < currentPath.Count)
         {
-            // 다음 칸 이동 시작 전 정지 요청 확인
             if (stopRequested)
             {
                 stopRequested = false;
@@ -173,21 +175,15 @@ public class MovementSystem : MonoBehaviour
             int remainingTiles = currentPath.Count - pathIndex;
             float currentSpeed = CalculateSpeed(remainingTiles);
 
-            // 타일 간 보간 이동
             float progress = 0f;
             bool stoppingThisTile = false;
 
             while (progress < 1f)
             {
-                // 정지 요청 감지 → 현재 칸까지는 빠르게 완료
                 if (stopRequested && !stoppingThisTile)
-                {
                     stoppingThisTile = true;
-                }
 
-                float speed = stoppingThisTile
-                    ? (baseSpeed * 3f)  // 빠르게 현재 칸 완료
-                    : currentSpeed;
+                float speed = stoppingThisTile ? (baseSpeed * 3f) : currentSpeed;
 
                 progress += (speed / tileDistance) * Time.deltaTime;
                 progress = Mathf.Min(progress, 1f);
@@ -196,18 +192,14 @@ public class MovementSystem : MonoBehaviour
                 yield return null;
             }
 
-            // 타일 도착
             CurrentTilePosition = nextTile;
             transform.position = endWorldPos;
 
-            // 타일 진입 이벤트
             OnTileEntered?.Invoke(CurrentTilePosition);
 
-            // StopMovement()가 호출되었을 수 있음 (이벤트 시스템에 의해)
             if (!IsMoving)
                 yield break;
 
-            // 정지 요청이 있었으면 이 타일에서 멈춤
             if (stoppingThisTile || stopRequested)
             {
                 stopRequested = false;
@@ -342,10 +334,6 @@ public class MovementSystem : MonoBehaviour
             fScore = f;
         }
     }
-
-    // ═══════════════════════════════════════════════════════
-    // 좌표 변환 유틸리티
-    // ═══════════════════════════════════════════════════════
 
     private Vector3 TileToWorld(Vector2Int tilePos)
     {

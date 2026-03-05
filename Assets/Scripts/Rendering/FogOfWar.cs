@@ -1,14 +1,13 @@
 // ============================================================
-// FogOfWar.cs — 전장의 안개 시스템 v4.2
+// FogOfWar.cs — 전장의 안개 시스템 v5
 // 위치: Assets/Scripts/Rendering/FogOfWar.cs
 // ============================================================
-// [v4.2 변경사항]
-//   - 시야 범위: 마름모(Manhattan) → 사각형(Chebyshev) 거리 기반
-//     visibleRadius=2일 때 5x5 사각형이 완전 가시, 7x7 사각형 경계가 반투명
-//     → 위/아래/좌/우 모서리가 검정으로 남는 문제 완전 해결
-//   - Ray 목표점도 사각형 경계로 변경
-//   - Color32 전체 갱신 방식 유지 (성능 + 안정성)
-//   - DungeonManager 참조
+// [v5 변경사항]
+//   - 층별 안개 상태 캐싱: 층 이동 시 현재 fogMap을 저장하고
+//     돌아왔을 때 복원 (이전에 탐험한 영역이 유지됨)
+//   - DungeonManager.OnFloorChanged 이벤트 구독
+//   - 층 변경 시 안개 완전 초기화 또는 캐시에서 복원
+//   - Mesh/Texture는 최초 1회만 생성 (맵 크기가 동일하므로 재사용)
 // ============================================================
 
 using System.Collections.Generic;
@@ -57,9 +56,14 @@ public class FogOfWar : MonoBehaviour
     private Color32[]    pixelBuffer;
 
     private int mapWidth, mapHeight;
-    private int edgeRadius; // visibleRadius + 1
+    private int edgeRadius;
 
     private Vector2Int lastPlayerTile = new Vector2Int(-999, -999);
+    private bool isInitialized = false;
+
+    // ─── 층별 안개 캐시 ───
+    private Dictionary<int, FogState[,]> fogCacheMap = new Dictionary<int, FogState[,]>();
+    private int currentCachedFloor = -1;
 
     // ─── 초기화 ───
 
@@ -85,23 +89,96 @@ public class FogOfWar : MonoBehaviour
         BuildMesh();
         BuildTexture();
 
+        // 이벤트 구독
         movementSystem.OnTileEntered += OnPlayerMoved;
-        UpdateFog(dungeonManager.StartPosition);
+        dungeonManager.OnFloorChanged += OnFloorChanged;
 
-        Debug.Log($"[FogOfWar] 초기화 완료 ({mapWidth}x{mapHeight}), 가시:{visibleRadius} 경계:{edgeRadius} (Chebyshev/사각형)");
+        currentCachedFloor = dungeonManager.CurrentFloorIndex;
+        UpdateFog(dungeonManager.StartPosition);
+        isInitialized = true;
+
+        Debug.Log($"[FogOfWar] 초기화 완료 ({mapWidth}x{mapHeight}), 가시:{visibleRadius} 경계:{edgeRadius}");
     }
 
     private void OnDestroy()
     {
         if (movementSystem != null) movementSystem.OnTileEntered -= OnPlayerMoved;
+        if (dungeonManager != null) dungeonManager.OnFloorChanged -= OnFloorChanged;
         if (fogTexture  != null) Destroy(fogTexture);
         if (fogMaterial != null && fogMaterialOverride == null) Destroy(fogMaterial);
     }
+
+    // ─── 이벤트 핸들러 ───
 
     private void OnPlayerMoved(Vector2Int pos)
     {
         if (pos == lastPlayerTile) return;
         UpdateFog(pos);
+    }
+
+    /// <summary>
+    /// 층이 변경되었을 때 호출된다.
+    /// 현재 안개 상태를 캐시에 저장하고, 새 층의 안개를 복원 또는 초기화한다.
+    /// </summary>
+    private void OnFloorChanged(int newFloorIndex)
+    {
+        if (!isInitialized) return;
+
+        // 1. 현재 층 안개 상태를 캐시에 저장
+        SaveCurrentFogToCache();
+
+        // 2. 새 층의 안개 복원 또는 초기화
+        currentCachedFloor = newFloorIndex;
+
+        if (fogCacheMap.ContainsKey(newFloorIndex))
+        {
+            // 이전에 방문한 층 → 캐시에서 복원
+            RestoreFogFromCache(newFloorIndex);
+            Debug.Log($"[FogOfWar] {newFloorIndex}층 안개 캐시에서 복원.");
+        }
+        else
+        {
+            // 처음 방문하는 층 → 완전 초기화 (모두 미탐험)
+            ResetFogMap();
+            Debug.Log($"[FogOfWar] {newFloorIndex}층 안개 새로 초기화.");
+        }
+
+        // 3. 플레이어 현재 위치 기준으로 안개 갱신
+        lastPlayerTile = new Vector2Int(-999, -999); // 강제 갱신
+        UpdateFog(movementSystem.CurrentTilePosition);
+    }
+
+    // ─── 캐시 관리 ───
+
+    private void SaveCurrentFogToCache()
+    {
+        if (currentCachedFloor < 0) return;
+
+        // fogMap 깊은 복사
+        FogState[,] copy = new FogState[mapWidth, mapHeight];
+        for (int x = 0; x < mapWidth; x++)
+            for (int y = 0; y < mapHeight; y++)
+                copy[x, y] = fogMap[x, y];
+
+        fogCacheMap[currentCachedFloor] = copy;
+    }
+
+    private void RestoreFogFromCache(int floorIndex)
+    {
+        FogState[,] cached = fogCacheMap[floorIndex];
+        for (int x = 0; x < mapWidth; x++)
+            for (int y = 0; y < mapHeight; y++)
+                fogMap[x, y] = cached[x, y];
+    }
+
+    private void ResetFogMap()
+    {
+        for (int x = 0; x < mapWidth; x++)
+            for (int y = 0; y < mapHeight; y++)
+                fogMap[x, y] = FogState.Unexplored;
+
+        currentVisible.Clear();
+        currentEdge.Clear();
     }
 
     // ─── FOV 갱신 ───
@@ -131,28 +208,16 @@ public class FogOfWar : MonoBehaviour
 
     // ═══════════════════════════════════════════════════════
     // Bresenham Ray Casting FOV (사각형 경계)
-    //
-    // 원리:
-    //   edgeRadius 크기의 사각형 경계 위의 모든 타일을 목표점으로 삼아
-    //   원점 → 목표점 방향으로 Bresenham 직선 Ray를 발사한다.
-    //   사각형 경계 = Chebyshev 거리(max(|dx|,|dy|)) == edgeRadius
-    //
-    //   마름모(Manhattan) 대신 사각형을 사용하면:
-    //   - 상/하/좌/우 대각선 모서리까지 빈틈없이 Ray가 도달
-    //   - visibleRadius=2일 때 5x5 완전 가시, 7x7 테두리 반투명
     // ═══════════════════════════════════════════════════════
 
     private void CastFieldOfView(Vector2Int origin)
     {
-        // 원점 항상 가시
         MarkVisible(origin, 0);
 
-        // 사각형 경계(Chebyshev 거리 == edgeRadius) 위의 모든 점을 향해 Ray 발사
         for (int dx = -edgeRadius; dx <= edgeRadius; dx++)
         {
             for (int dy = -edgeRadius; dy <= edgeRadius; dy++)
             {
-                // 사각형 경계만 (테두리 한 줄)
                 if (Mathf.Abs(dx) != edgeRadius && Mathf.Abs(dy) != edgeRadius)
                     continue;
 
@@ -179,11 +244,9 @@ public class FogOfWar : MonoBehaviour
             {
                 if (cx < 0 || cx >= mapWidth || cy < 0 || cy >= mapHeight) break;
 
-                // Chebyshev 거리 = max(|dx|, |dy|)
                 int dist = Mathf.Max(Mathf.Abs(cx - x0), Mathf.Abs(cy - y0));
                 MarkVisible(new Vector2Int(cx, cy), dist);
 
-                // 벽: 이 타일에서 시야 차단 (벽 자체는 보임)
                 if (dungeonManager.Grid[cx, cy].type == TileType.WALL) break;
             }
 
@@ -195,10 +258,6 @@ public class FogOfWar : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// dist <= visibleRadius → 완전 투명 (가시)
-    /// dist > visibleRadius → 반투명 (경계)
-    /// </summary>
     private void MarkVisible(Vector2Int pos, int dist)
     {
         currentVisible.Add(pos);
@@ -206,7 +265,7 @@ public class FogOfWar : MonoBehaviour
             currentEdge.Add(pos);
     }
 
-    // ─── 텍스처 적용 (Color32 전체 갱신) ───
+    // ─── 텍스처 적용 ───
 
     private void ApplyTexture()
     {
@@ -256,7 +315,7 @@ public class FogOfWar : MonoBehaviour
         return !currentEdge.Contains(new Vector2Int(x, y));
     }
 
-    // ─── Mesh / Texture ───
+    // ─── Mesh / Texture (최초 1회 생성, 층 변경 시 재사용) ───
 
     private void InitFogMap()
     {
@@ -337,13 +396,11 @@ public class FogOfWar : MonoBehaviour
         if (!Application.isPlaying || movementSystem == null) return;
         Vector2Int p = movementSystem.CurrentTilePosition;
 
-        // 완전 가시 범위 (사각형)
         Gizmos.color = new Color(0f, 1f, 0f, 0.2f);
         for (int x = -visibleRadius; x <= visibleRadius; x++)
             for (int y = -visibleRadius; y <= visibleRadius; y++)
                 Gizmos.DrawCube(new Vector3(p.x + x + 0.5f, p.y + y + 0.5f, 0), Vector3.one);
 
-        // 경계 범위 (사각형 테두리)
         Gizmos.color = new Color(1f, 1f, 0f, 0.2f);
         for (int x = -edgeRadius; x <= edgeRadius; x++)
             for (int y = -edgeRadius; y <= edgeRadius; y++)
