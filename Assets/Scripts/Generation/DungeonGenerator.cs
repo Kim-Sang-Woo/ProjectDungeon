@@ -1,16 +1,24 @@
 // ============================================================
 // DungeonGenerator.cs — 던전 생성 시스템
-// 기획서 Ch.1 참조 — Script Execution Order: -50
+// 기획서 Ch.1 참조
+// 위치: Assets/Scripts/Generation/DungeonGenerator.cs
+// ============================================================
+// [v2 변경사항]
+//   - 렌더링 책임 → DungeonRenderer로 분리
+//   - 런타임 데이터 저장 → DungeonManager로 분리
+//   - TileData struct → class 대응
+//   - BuildDelaunayGraph() → BuildCompleteGraph() 메서드명 변경
+//   - ValidateConnectivity() BFS: HashSet<Vector2Int> → bool[,] 최적화
+//   - GenerateAndReturn() out 파라미터 방식으로 변경
 // ============================================================
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using UnityEngine.Tilemaps;
 
 /// <summary>
 /// 무작위 던전을 생성하는 핵심 시스템.
 /// DungeonFloorData를 입력받아 TileData[,] grid를 반환한다.
-/// 생성 파이프라인: 방 배치 → Delaunay → MST → 루프 추가 → 복도 생성 → 계단 배치 → 이벤트 배치 → 검증
+/// 생성 파이프라인: 방 배치 → 완전그래프 → MST → 루프 추가 → 복도 생성 → 계단 배치 → 이벤트 배치 → 검증
 /// </summary>
 public class DungeonGenerator : MonoBehaviour
 {
@@ -18,30 +26,15 @@ public class DungeonGenerator : MonoBehaviour
     [Tooltip("층 설정 ScriptableObject")]
     public DungeonFloorData floorData;
 
-    [Header("타일맵")]
-    [Tooltip("던전을 렌더링할 Tilemap 참조")]
-    public Tilemap tilemap;
-
-    [Tooltip("바닥 타일")]
-    public TileBase floorTile;
-    [Tooltip("벽 타일")]
-    public TileBase wallTile;
-    [Tooltip("복도 타일 (null이면 floorTile 사용)")]
-    public TileBase corridorTile;
-    [Tooltip("입구 계단 타일 (null이면 floorTile 사용)")]
-    public TileBase stairsUpTile;
-    [Tooltip("출구 계단 타일 (null이면 floorTile 사용)")]
-    public TileBase stairsDownTile;
-
     [Header("이벤트 에셋 목록")]
     [Tooltip("배치 가능한 이벤트 데이터 목록")]
     public List<DungeonEventData> eventPool = new List<DungeonEventData>();
 
-    // ─── 런타임 데이터 (외부에서 참조 가능) ───
-    [HideInInspector] public TileData[,] grid;
-    [HideInInspector] public List<RoomData> rooms = new List<RoomData>();
-    [HideInInspector] public Vector2Int startPosition;
-    [HideInInspector] public Vector2Int exitPosition;
+    // ─── 내부 생성 데이터 ───
+    private TileData[,] grid;
+    private List<RoomData> rooms = new List<RoomData>();
+    private Vector2Int startPosition;
+    private Vector2Int exitPosition;
 
     // Delaunay/MST용 간선 구조체
     private struct Edge
@@ -56,53 +49,58 @@ public class DungeonGenerator : MonoBehaviour
 
     // ─── 진입점 ───
 
-    private void Start()
-    {
-        GenerateAndRender();
-    }
-
     /// <summary>
-    /// 던전을 생성하고 타일맵에 렌더링한다.
+    /// 던전을 생성하고 결과를 out 파라미터로 반환한다.
+    /// DungeonManager가 호출한다.
     /// </summary>
-    public void GenerateAndRender()
+    public bool GenerateAndReturn(
+        out TileData[,] outGrid,
+        out List<RoomData> outRooms,
+        out Vector2Int outStart,
+        out Vector2Int outExit)
     {
         for (int attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++)
         {
-            grid = Generate(floorData);
+            Generate(floorData);
+
             if (ValidateConnectivity())
             {
-                RenderToTilemap();
+                outGrid = grid;
+                outRooms = rooms;
+                outStart = startPosition;
+                outExit = exitPosition;
+
                 Debug.Log($"[DungeonGenerator] 던전 생성 완료! 방 수: {rooms.Count}, 시도: {attempt + 1}회");
-                return;
+                return true;
             }
+
             Debug.LogWarning($"[DungeonGenerator] 연결성 검증 실패. 재생성 시도 #{attempt + 2}");
         }
 
         Debug.LogError("[DungeonGenerator] 최대 시도 횟수 초과! 던전 생성 실패.");
+        outGrid = null;
+        outRooms = null;
+        outStart = Vector2Int.zero;
+        outExit = Vector2Int.zero;
+        return false;
     }
 
     /// <summary>
     /// 기획서 Ch.1: 던전 생성 메인 파이프라인
     /// </summary>
-    public TileData[,] Generate(DungeonFloorData data)
+    private void Generate(DungeonFloorData data)
     {
-        // 그리드 초기화 (모두 벽으로)
+        // 그리드 초기화 (모두 벽으로) — TileData는 class이므로 new 필요
         grid = new TileData[data.mapWidth, data.mapHeight];
         for (int x = 0; x < data.mapWidth; x++)
         {
             for (int y = 0; y < data.mapHeight; y++)
             {
-                grid[x, y] = new TileData
-                {
-                    type = TileType.WALL,
-                    roomId = -1,
-                    eventData = null,
-                    isEventConsumed = false
-                };
+                grid[x, y] = new TileData();
             }
         }
 
-        rooms.Clear();
+        rooms = new List<RoomData>();
 
         // Step 1: 방 배치
         PlaceRooms(data);
@@ -110,17 +108,17 @@ public class DungeonGenerator : MonoBehaviour
         if (rooms.Count < 2)
         {
             Debug.LogWarning("[DungeonGenerator] 방이 2개 미만. 재생성 필요.");
-            return grid;
+            return;
         }
 
-        // Step 2: Delaunay 삼각 그래프 생성
-        List<Edge> delaunayEdges = BuildDelaunayGraph();
+        // Step 2: 완전 그래프 생성 (모든 방 쌍 간선)
+        List<Edge> allEdges = BuildCompleteGraph();
 
         // Step 3: MST 추출 (Kruskal)
-        List<Edge> mstEdges = BuildMST(delaunayEdges);
+        List<Edge> mstEdges = BuildMST(allEdges);
 
         // Step 4: 루프 간선 추가
-        List<Edge> finalEdges = AddLoopEdges(delaunayEdges, mstEdges, data.loopEdgeProbability);
+        List<Edge> finalEdges = AddLoopEdges(allEdges, mstEdges, data.loopEdgeProbability);
 
         // Step 5: 복도 생성
         CarveCorridors(finalEdges);
@@ -133,43 +131,31 @@ public class DungeonGenerator : MonoBehaviour
 
         // Step 7: 이벤트 배치
         PlaceEvents(data.eventDensity);
-
-        return grid;
     }
 
     // ═══════════════════════════════════════════════════════
     // Step 1: 방 배치
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>
-    /// 기획서 1.1: 전체 맵 공간 내에 방들을 무작위로 배치한다.
-    /// 방끼리는 서로 겹치지 않도록 최소 1칸의 간격을 유지한다.
-    /// </summary>
     private void PlaceRooms(DungeonFloorData data)
     {
         int targetRoomCount = Random.Range(data.roomCountMin, data.roomCountMax + 1);
 
         for (int attempt = 0; attempt < MAX_ROOM_PLACEMENT_ATTEMPTS && rooms.Count < targetRoomCount; attempt++)
         {
-            // 기획서: 최소 2×2, 최대 10×10
             int width = Random.Range(2, 11);
             int height = Random.Range(2, 11);
-
-            // 맵 경계 안에 배치 (경계 1칸 여유)
             int x = Random.Range(1, data.mapWidth - width - 1);
             int y = Random.Range(1, data.mapHeight - height - 1);
 
             RectInt newBounds = new RectInt(x, y, width, height);
 
-            // 겹침 검사 (최소 1칸 간격)
             if (IsRoomOverlapping(newBounds))
                 continue;
 
-            // 방 생성
             RoomData room = new RoomData(rooms.Count, newBounds);
             rooms.Add(room);
 
-            // 그리드에 바닥 타일 기록
             for (int rx = x; rx < x + width; rx++)
             {
                 for (int ry = y; ry < y + height; ry++)
@@ -181,15 +167,11 @@ public class DungeonGenerator : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 새 방이 기존 방과 겹치는지 검사 (1칸 간격 포함)
-    /// </summary>
     private bool IsRoomOverlapping(RectInt newBounds)
     {
         foreach (var room in rooms)
         {
             RectInt existing = room.bounds;
-            // 1칸 여유를 두고 확장하여 겹침 검사
             if (newBounds.xMin < existing.xMax + 1 &&
                 newBounds.xMax + 1 > existing.xMin &&
                 newBounds.yMin < existing.yMax + 1 &&
@@ -202,14 +184,15 @@ public class DungeonGenerator : MonoBehaviour
     }
 
     // ═══════════════════════════════════════════════════════
-    // Step 2: Delaunay Triangulation (Bowyer-Watson)
+    // Step 2: 완전 그래프 생성
     // ═══════════════════════════════════════════════════════
 
     /// <summary>
-    /// 기획서 1.1-02: Delaunay Triangulation으로 방들의 삼각 연결 그래프를 생성한다.
-    /// Bowyer-Watson 알고리즘 사용.
+    /// 모든 방 쌍 사이의 간선을 생성한다.
+    /// 방 수가 6~10개 수준이므로 O(n²)이 실용적이다.
+    /// 방이 20개 이상으로 확장 시 실제 Delaunay Triangulation으로 교체 권장.
     /// </summary>
-    private List<Edge> BuildDelaunayGraph()
+    private List<Edge> BuildCompleteGraph()
     {
         List<Vector2> points = rooms.Select(r => new Vector2(r.center.x, r.center.y)).ToList();
         List<Edge> edges = new List<Edge>();
@@ -217,8 +200,6 @@ public class DungeonGenerator : MonoBehaviour
         if (points.Count < 2)
             return edges;
 
-        // 간이 Delaunay: 방 수가 적으므로 (6~10개) 모든 쌍 거리 계산으로 대체
-        // (Bowyer-Watson은 방이 매우 많을 때 효율적이지만 10개 이하에서는 과도함)
         for (int i = 0; i < points.Count; i++)
         {
             for (int j = i + 1; j < points.Count; j++)
@@ -235,10 +216,6 @@ public class DungeonGenerator : MonoBehaviour
     // Step 3: MST (Kruskal)
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>
-    /// 기획서 1.1-03: MST(Minimum Spanning Tree, Kruskal 알고리즘)를 적용해
-    /// 모든 방을 최소 비용으로 연결하는 트리를 추출한다.
-    /// </summary>
     private List<Edge> BuildMST(List<Edge> allEdges)
     {
         List<Edge> sorted = allEdges.OrderBy(e => e.distance).ToList();
@@ -248,7 +225,7 @@ public class DungeonGenerator : MonoBehaviour
         {
             while (parent[x] != x)
             {
-                parent[x] = parent[parent[x]]; // path compression
+                parent[x] = parent[parent[x]];
                 x = parent[x];
             }
             return x;
@@ -278,10 +255,6 @@ public class DungeonGenerator : MonoBehaviour
     // Step 4: 루프 간선 추가
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>
-    /// 기획서 1.1-04: MST에서 제외된 일부 간선을 loopEdgeProbability 확률로 복원하여
-    /// 루프(Loop) 경로를 추가한다.
-    /// </summary>
     private List<Edge> AddLoopEdges(List<Edge> allEdges, List<Edge> mstEdges, float probability)
     {
         List<Edge> result = new List<Edge>(mstEdges);
@@ -308,10 +281,6 @@ public class DungeonGenerator : MonoBehaviour
     // Step 5: 복도 생성
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>
-    /// 기획서 1.1-05: 각 연결 간선을 따라 복도를 생성한다 (L자 혹은 직선 선택).
-    /// 복도 폭은 항상 1칸.
-    /// </summary>
     private void CarveCorridors(List<Edge> edges)
     {
         foreach (var edge in edges)
@@ -319,7 +288,6 @@ public class DungeonGenerator : MonoBehaviour
             Vector2Int start = rooms[edge.roomA].center;
             Vector2Int end = rooms[edge.roomB].center;
 
-            // 50% 확률로 수평 먼저 또는 수직 먼저 (L자 방향 결정)
             if (Random.value > 0.5f)
             {
                 CarveHorizontalTunnel(start.x, end.x, start.y);
@@ -367,9 +335,6 @@ public class DungeonGenerator : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 간선 정보를 RoomData.connectedRoomIds에 기록
-    /// </summary>
     private void RecordConnections(List<Edge> edges)
     {
         foreach (var edge in edges)
@@ -385,13 +350,8 @@ public class DungeonGenerator : MonoBehaviour
     // Step 6: 계단 배치
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>
-    /// 기획서 1.2: BFS로 모든 방 쌍 거리를 계산하여 가장 멀리 떨어진 두 방에
-    /// 각각 입구/출구를 배치한다.
-    /// </summary>
     private void PlaceStairs(List<Edge> mstEdges)
     {
-        // 인접 리스트 구성 (MST 기반)
         Dictionary<int, List<int>> adj = new Dictionary<int, List<int>>();
         for (int i = 0; i < rooms.Count; i++)
             adj[i] = new List<int>();
@@ -402,7 +362,6 @@ public class DungeonGenerator : MonoBehaviour
             adj[edge.roomB].Add(edge.roomA);
         }
 
-        // 모든 방 쌍의 BFS 거리 계산 → 최원거리 쌍 선택
         int startRoom = 0, exitRoom = 0;
         int maxDist = 0;
 
@@ -420,11 +379,8 @@ public class DungeonGenerator : MonoBehaviour
             }
         }
 
-        // 방 타입 설정
         rooms[startRoom].roomType = RoomType.START;
         rooms[exitRoom].roomType = RoomType.EXIT;
-
-        // 시작/출구 위치 기록
         startPosition = rooms[startRoom].center;
         exitPosition = rooms[exitRoom].center;
 
@@ -460,10 +416,6 @@ public class DungeonGenerator : MonoBehaviour
     // Step 7: 이벤트 배치
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>
-    /// 기획서 3.1: 바닥 타일의 eventDensity(15%) 비율로 이벤트를 랜덤 배치.
-    /// 시작 방(START)과 출구 방(EXIT)에는 이벤트를 배치하지 않는다.
-    /// </summary>
     private void PlaceEvents(float density)
     {
         if (eventPool == null || eventPool.Count == 0)
@@ -472,7 +424,6 @@ public class DungeonGenerator : MonoBehaviour
             return;
         }
 
-        // 유효한 후보 타일 수집 (START/EXIT 방 제외)
         List<Vector2Int> candidates = new List<Vector2Int>();
         for (int x = 0; x < floorData.mapWidth; x++)
         {
@@ -480,7 +431,6 @@ public class DungeonGenerator : MonoBehaviour
             {
                 if (!grid[x, y].IsWalkable) continue;
 
-                // START/EXIT 방은 제외
                 int rid = grid[x, y].roomId;
                 if (rid >= 0)
                 {
@@ -493,11 +443,9 @@ public class DungeonGenerator : MonoBehaviour
             }
         }
 
-        // 이벤트 배치 수 결정
         int eventCount = Mathf.RoundToInt(candidates.Count * density);
-
-        // 셔플 후 배치
         Shuffle(candidates);
+
         for (int i = 0; i < eventCount && i < candidates.Count; i++)
         {
             Vector2Int pos = candidates[i];
@@ -521,26 +469,31 @@ public class DungeonGenerator : MonoBehaviour
     }
 
     // ═══════════════════════════════════════════════════════
-    // 유효성 검증
+    // 유효성 검증 — bool[,] 최적화
     // ═══════════════════════════════════════════════════════
 
     /// <summary>
-    /// 기획서 1.1-06: 생성 완료 후 유효성 검증.
-    /// 모든 이동 가능 타일이 하나의 연결 컴포넌트를 형성하는지 BFS로 확인.
+    /// 모든 이동 가능 타일이 하나의 연결 컴포넌트를 형성하는지 확인.
+    /// HashSet 대신 bool[,] 배열을 사용하여 GC 압력을 줄임.
     /// </summary>
     private bool ValidateConnectivity()
     {
+        int w = floorData.mapWidth;
+        int h = floorData.mapHeight;
+
         // 첫 번째 이동 가능 타일 찾기
         Vector2Int? startTile = null;
         int walkableCount = 0;
 
-        for (int x = 0; x < floorData.mapWidth && !startTile.HasValue; x++)
+        for (int x = 0; x < w; x++)
         {
-            for (int y = 0; y < floorData.mapHeight && !startTile.HasValue; y++)
+            for (int y = 0; y < h; y++)
             {
                 if (grid[x, y].IsWalkable)
                 {
-                    startTile = new Vector2Int(x, y);
+                    walkableCount++;
+                    if (!startTile.HasValue)
+                        startTile = new Vector2Int(x, y);
                 }
             }
         }
@@ -548,121 +501,40 @@ public class DungeonGenerator : MonoBehaviour
         if (!startTile.HasValue)
             return false;
 
-        // 전체 이동 가능 타일 수 카운트
-        for (int x = 0; x < floorData.mapWidth; x++)
-            for (int y = 0; y < floorData.mapHeight; y++)
-                if (grid[x, y].IsWalkable) walkableCount++;
-
-        // BFS로 연결된 타일 수 카운트
-        HashSet<Vector2Int> visited = new HashSet<Vector2Int>();
+        // BFS — bool[,] visited 사용
+        bool[,] visited = new bool[w, h];
         Queue<Vector2Int> queue = new Queue<Vector2Int>();
         queue.Enqueue(startTile.Value);
-        visited.Add(startTile.Value);
+        visited[startTile.Value.x, startTile.Value.y] = true;
+        int visitedCount = 1;
 
-        Vector2Int[] directions = { Vector2Int.up, Vector2Int.down, Vector2Int.left, Vector2Int.right };
+        int[] dx = { 0, 0, -1, 1 };
+        int[] dy = { 1, -1, 0, 0 };
 
         while (queue.Count > 0)
         {
             Vector2Int current = queue.Dequeue();
-            foreach (var dir in directions)
+            for (int d = 0; d < 4; d++)
             {
-                Vector2Int next = current + dir;
-                if (next.x >= 0 && next.x < floorData.mapWidth &&
-                    next.y >= 0 && next.y < floorData.mapHeight &&
-                    grid[next.x, next.y].IsWalkable &&
-                    !visited.Contains(next))
+                int nx = current.x + dx[d];
+                int ny = current.y + dy[d];
+
+                if (nx >= 0 && nx < w && ny >= 0 && ny < h &&
+                    !visited[nx, ny] && grid[nx, ny].IsWalkable)
                 {
-                    visited.Add(next);
-                    queue.Enqueue(next);
+                    visited[nx, ny] = true;
+                    visitedCount++;
+                    queue.Enqueue(new Vector2Int(nx, ny));
                 }
             }
         }
 
-        bool isConnected = visited.Count == walkableCount;
+        bool isConnected = visitedCount == walkableCount;
         if (!isConnected)
         {
-            Debug.LogWarning($"[DungeonGenerator] 연결성 검증 실패! 연결: {visited.Count} / 전체: {walkableCount}");
+            Debug.LogWarning($"[DungeonGenerator] 연결성 검증 실패! 연결: {visitedCount} / 전체: {walkableCount}");
         }
 
         return isConnected;
-    }
-
-    // ═══════════════════════════════════════════════════════
-    // 타일맵 렌더링
-    // ═══════════════════════════════════════════════════════
-
-    /// <summary>
-    /// TileData[,] grid를 Unity Tilemap에 렌더링한다.
-    /// </summary>
-    private void RenderToTilemap()
-    {
-        if (tilemap == null)
-        {
-            Debug.LogError("[DungeonGenerator] Tilemap 참조가 설정되지 않았습니다!");
-            return;
-        }
-
-        tilemap.ClearAllTiles();
-
-        for (int x = 0; x < floorData.mapWidth; x++)
-        {
-            for (int y = 0; y < floorData.mapHeight; y++)
-            {
-                Vector3Int tilePos = new Vector3Int(x, y, 0);
-                TileBase tile = null;
-
-                switch (grid[x, y].type)
-                {
-                    case TileType.WALL:
-                        tile = wallTile;
-                        break;
-                    case TileType.FLOOR:
-                        tile = floorTile;
-                        break;
-                    case TileType.CORRIDOR:
-                        tile = corridorTile != null ? corridorTile : floorTile;
-                        break;
-                }
-
-                if (tile != null)
-                    tilemap.SetTile(tilePos, tile);
-            }
-        }
-
-        // 입구/출구 계단 타일 오버라이드
-        if (stairsUpTile != null)
-            tilemap.SetTile(new Vector3Int(startPosition.x, startPosition.y, 0), stairsUpTile);
-        if (stairsDownTile != null)
-            tilemap.SetTile(new Vector3Int(exitPosition.x, exitPosition.y, 0), stairsDownTile);
-    }
-
-    // ═══════════════════════════════════════════════════════
-    // 공용 헬퍼
-    // ═══════════════════════════════════════════════════════
-
-    /// <summary>
-    /// 특정 좌표가 이동 가능한 타일인지 확인
-    /// </summary>
-    public bool IsWalkable(int x, int y)
-    {
-        if (x < 0 || x >= floorData.mapWidth || y < 0 || y >= floorData.mapHeight)
-            return false;
-        return grid[x, y].IsWalkable;
-    }
-
-    /// <summary>
-    /// 특정 좌표의 TileData를 반환
-    /// </summary>
-    public TileData GetTileData(int x, int y)
-    {
-        return grid[x, y];
-    }
-
-    /// <summary>
-    /// 특정 좌표의 TileData를 설정 (이벤트 소진 등)
-    /// </summary>
-    public void SetTileData(int x, int y, TileData data)
-    {
-        grid[x, y] = data;
     }
 }

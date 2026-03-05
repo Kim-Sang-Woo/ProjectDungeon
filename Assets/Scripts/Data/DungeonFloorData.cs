@@ -1,6 +1,7 @@
 // ============================================================
 // DungeonFloorData.cs — 층 전체 설정 (ScriptableObject)
 // 기획서 Ch.0.1 참조
+// 위치: Assets/Scripts/Data/DungeonFloorData.cs
 // ============================================================
 using UnityEngine;
 

@@ -1,21 +1,14 @@
 // ============================================================
-// FogOfWar.cs — 전장의 안개 시스템 v3
-// [수정] 복도 시야 수정 — Bresenham Ray Casting 방식으로 교체
+// FogOfWar.cs — 전장의 안개 시스템 v4.2
+// 위치: Assets/Scripts/Rendering/FogOfWar.cs
 // ============================================================
-// [씬 배치]
-//   Hierarchy: DungeonManager 하위 FogOfWar 빈 GameObject
-//   컴포넌트: FogOfWar.cs 부착
-//
-// [Inspector 연결 필수]
-//   movementSystem   → Player/MovementSystem
-//   dungeonGenerator → DungeonManager/DungeonGenerator
-//
-// [v3 변경 사항]
-//   Shadowcasting → Bresenham Ray Casting 방식으로 교체
-//   - 복도(폭 1칸)에서 전방이 1칸만 보이던 문제 수정
-//   - 원점에서 가시 범위 경계의 모든 타일로 Ray를 쏘아
-//     첫 번째 벽 타일에서 차단, 그 이전까지만 밝힘
-//   - 복도에서 전방 3타일, 방 안에서 사방 3타일 정상 동작
+// [v4.2 변경사항]
+//   - 시야 범위: 마름모(Manhattan) → 사각형(Chebyshev) 거리 기반
+//     visibleRadius=2일 때 5x5 사각형이 완전 가시, 7x7 사각형 경계가 반투명
+//     → 위/아래/좌/우 모서리가 검정으로 남는 문제 완전 해결
+//   - Ray 목표점도 사각형 경계로 변경
+//   - Color32 전체 갱신 방식 유지 (성능 + 안정성)
+//   - DungeonManager 참조
 // ============================================================
 
 using System.Collections.Generic;
@@ -27,10 +20,10 @@ public class FogOfWar : MonoBehaviour
 
     [Header("필수 참조")]
     public MovementSystem movementSystem;
-    public DungeonGenerator dungeonGenerator;
+    public DungeonManager dungeonManager;
 
     [Header("안개 설정")]
-    [Tooltip("완전 가시 반경 (0~visibleRadius 타일 완전 투명)")]
+    [Tooltip("완전 가시 반경 (Chebyshev 거리 기준, 정사각형 범위)")]
     public int visibleRadius = 2;
 
     [Tooltip("반투명 경계 알파 (기획서: 50%)")]
@@ -39,6 +32,10 @@ public class FogOfWar : MonoBehaviour
 
     [Tooltip("안개 Mesh Z축 (타일맵보다 앞, UI보다 뒤)")]
     public float fogZDepth = -0.5f;
+
+    [Header("셰이더 (선택)")]
+    [Tooltip("직접 할당하면 Shader.Find를 건너뜁니다. 빌드 시 안정적.")]
+    public Material fogMaterialOverride;
 
     // ─── 내부 상태 ───
 
@@ -57,9 +54,10 @@ public class FogOfWar : MonoBehaviour
     private MeshRenderer meshRenderer;
     private MeshFilter   meshFilter;
     private Material     fogMaterial;
+    private Color32[]    pixelBuffer;
 
     private int mapWidth, mapHeight;
-    private int edgeRadius;
+    private int edgeRadius; // visibleRadius + 1
 
     private Vector2Int lastPlayerTile = new Vector2Int(-999, -999);
 
@@ -69,9 +67,9 @@ public class FogOfWar : MonoBehaviour
     {
         edgeRadius = visibleRadius + 1;
 
-        if (dungeonGenerator == null || dungeonGenerator.grid == null)
+        if (dungeonManager == null || dungeonManager.Grid == null)
         {
-            Debug.LogError("[FogOfWar] DungeonGenerator 참조 없음 또는 던전 미생성!");
+            Debug.LogError("[FogOfWar] DungeonManager 참조 없음 또는 던전 미생성!");
             return;
         }
         if (movementSystem == null)
@@ -80,24 +78,24 @@ public class FogOfWar : MonoBehaviour
             return;
         }
 
-        mapWidth  = dungeonGenerator.floorData.mapWidth;
-        mapHeight = dungeonGenerator.floorData.mapHeight;
+        mapWidth  = dungeonManager.MapWidth;
+        mapHeight = dungeonManager.MapHeight;
 
         InitFogMap();
         BuildMesh();
         BuildTexture();
 
         movementSystem.OnTileEntered += OnPlayerMoved;
-        UpdateFog(dungeonGenerator.startPosition);
+        UpdateFog(dungeonManager.StartPosition);
 
-        Debug.Log($"[FogOfWar] 초기화 완료 ({mapWidth}x{mapHeight}), 가시:{visibleRadius} 경계:{edgeRadius}");
+        Debug.Log($"[FogOfWar] 초기화 완료 ({mapWidth}x{mapHeight}), 가시:{visibleRadius} 경계:{edgeRadius} (Chebyshev/사각형)");
     }
 
     private void OnDestroy()
     {
         if (movementSystem != null) movementSystem.OnTileEntered -= OnPlayerMoved;
         if (fogTexture  != null) Destroy(fogTexture);
-        if (fogMaterial != null) Destroy(fogMaterial);
+        if (fogMaterial != null && fogMaterialOverride == null) Destroy(fogMaterial);
     }
 
     private void OnPlayerMoved(Vector2Int pos)
@@ -132,16 +130,16 @@ public class FogOfWar : MonoBehaviour
     }
 
     // ═══════════════════════════════════════════════════════
-    // Bresenham Ray Casting FOV
+    // Bresenham Ray Casting FOV (사각형 경계)
     //
     // 원리:
-    //   마름모 경계(edgeRadius) 위의 모든 타일을 목표점으로 삼아
+    //   edgeRadius 크기의 사각형 경계 위의 모든 타일을 목표점으로 삼아
     //   원점 → 목표점 방향으로 Bresenham 직선 Ray를 발사한다.
-    //   Ray가 지나는 각 타일:
-    //     - FLOOR / CORRIDOR : 가시 처리 후 계속 진행
-    //     - WALL             : 가시 처리(벽 자체는 보임) 후 Ray 중단
-    //   복도처럼 좁은 통로에서도 Ray가 직선으로 뚫리므로
-    //   전방 edgeRadius 타일까지 정상적으로 밝혀진다.
+    //   사각형 경계 = Chebyshev 거리(max(|dx|,|dy|)) == edgeRadius
+    //
+    //   마름모(Manhattan) 대신 사각형을 사용하면:
+    //   - 상/하/좌/우 대각선 모서리까지 빈틈없이 Ray가 도달
+    //   - visibleRadius=2일 때 5x5 완전 가시, 7x7 테두리 반투명
     // ═══════════════════════════════════════════════════════
 
     private void CastFieldOfView(Vector2Int origin)
@@ -149,24 +147,20 @@ public class FogOfWar : MonoBehaviour
         // 원점 항상 가시
         MarkVisible(origin, 0);
 
-        // 마름모 경계 위의 모든 점을 향해 Ray 발사
+        // 사각형 경계(Chebyshev 거리 == edgeRadius) 위의 모든 점을 향해 Ray 발사
         for (int dx = -edgeRadius; dx <= edgeRadius; dx++)
         {
-            int dyMax = edgeRadius - Mathf.Abs(dx);
-            for (int dy = -dyMax; dy <= dyMax; dy++)
+            for (int dy = -edgeRadius; dy <= edgeRadius; dy++)
             {
-                // 경계(dist == edgeRadius)인 타일만 목표점으로 사용
-                // 내부 타일은 경계를 향한 Ray가 지나면서 자동으로 밝혀짐
-                if (Mathf.Abs(dx) + Mathf.Abs(dy) != edgeRadius) continue;
+                // 사각형 경계만 (테두리 한 줄)
+                if (Mathf.Abs(dx) != edgeRadius && Mathf.Abs(dy) != edgeRadius)
+                    continue;
+
                 CastRay(origin, origin + new Vector2Int(dx, dy));
             }
         }
     }
 
-    /// <summary>
-    /// origin → target 방향으로 Bresenham 직선을 따라
-    /// 타일을 확인하고 벽에서 시야를 차단한다.
-    /// </summary>
     private void CastRay(Vector2Int origin, Vector2Int target)
     {
         int x0 = origin.x, y0 = origin.y;
@@ -181,16 +175,16 @@ public class FogOfWar : MonoBehaviour
 
         while (true)
         {
-            // 원점은 CastFieldOfView에서 이미 처리
             if (cx != x0 || cy != y0)
             {
                 if (cx < 0 || cx >= mapWidth || cy < 0 || cy >= mapHeight) break;
 
-                int dist = Mathf.Abs(cx - x0) + Mathf.Abs(cy - y0);
+                // Chebyshev 거리 = max(|dx|, |dy|)
+                int dist = Mathf.Max(Mathf.Abs(cx - x0), Mathf.Abs(cy - y0));
                 MarkVisible(new Vector2Int(cx, cy), dist);
 
-                // 벽: 이 타일에서 시야 차단
-                if (dungeonGenerator.grid[cx, cy].type == TileType.WALL) break;
+                // 벽: 이 타일에서 시야 차단 (벽 자체는 보임)
+                if (dungeonManager.Grid[cx, cy].type == TileType.WALL) break;
             }
 
             if (cx == x1 && cy == y1) break;
@@ -201,58 +195,60 @@ public class FogOfWar : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// dist <= visibleRadius → 완전 투명 (가시)
+    /// dist > visibleRadius → 반투명 (경계)
+    /// </summary>
     private void MarkVisible(Vector2Int pos, int dist)
     {
         currentVisible.Add(pos);
-        if (dist >= edgeRadius)
+        if (dist > visibleRadius)
             currentEdge.Add(pos);
     }
 
-    // ─── 텍스처 적용 ───
+    // ─── 텍스처 적용 (Color32 전체 갱신) ───
 
     private void ApplyTexture()
     {
-        Color[] pixels = fogTexture.GetPixels();
+        byte edgeByte = (byte)(edgeAlpha * 255);
 
         for (int x = 0; x < mapWidth; x++)
         {
             for (int y = 0; y < mapHeight; y++)
             {
-                float alpha;
+                byte alpha;
                 switch (fogMap[x, y])
                 {
                     case FogState.Unexplored:
-                        alpha = 1.0f;
+                        alpha = 255;
                         break;
                     case FogState.Explored:
-                        alpha = edgeAlpha;
+                        alpha = edgeByte;
                         break;
                     case FogState.Visible:
                         alpha = currentEdge.Contains(new Vector2Int(x, y))
-                            ? edgeAlpha : 0.0f;
+                            ? edgeByte : (byte)0;
                         break;
                     default:
-                        alpha = 1.0f;
+                        alpha = 255;
                         break;
                 }
-                pixels[y * mapWidth + x] = new Color(0f, 0f, 0f, alpha);
+                pixelBuffer[y * mapWidth + x] = new Color32(0, 0, 0, alpha);
             }
         }
 
-        fogTexture.SetPixels(pixels);
+        fogTexture.SetPixels32(pixelBuffer);
         fogTexture.Apply();
     }
 
     // ─── 공개 API ───
 
-    /// <summary>탐험된 타일(Explored 또는 Visible)이면 true.</summary>
     public bool IsTileRevealed(int x, int y)
     {
         if (x < 0 || x >= mapWidth || y < 0 || y >= mapHeight) return false;
         return fogMap[x, y] != FogState.Unexplored;
     }
 
-    /// <summary>현재 완전 가시 상태이면 true.</summary>
     public bool IsTileFullyVisible(int x, int y)
     {
         if (x < 0 || x >= mapWidth || y < 0 || y >= mapHeight) return false;
@@ -300,29 +296,37 @@ public class FogOfWar : MonoBehaviour
             wrapMode   = TextureWrapMode.Clamp
         };
 
-        Color[] init = new Color[mapWidth * mapHeight];
-        for (int i = 0; i < init.Length; i++)
-            init[i] = new Color(0f, 0f, 0f, 1f);
-        fogTexture.SetPixels(init);
+        pixelBuffer = new Color32[mapWidth * mapHeight];
+        for (int i = 0; i < pixelBuffer.Length; i++)
+            pixelBuffer[i] = new Color32(0, 0, 0, 255);
+        fogTexture.SetPixels32(pixelBuffer);
         fogTexture.Apply();
 
-        Shader shader = Shader.Find("Sprites/Default")
-                     ?? Shader.Find("Universal Render Pipeline/Unlit");
-        if (shader == null)
+        if (fogMaterialOverride != null)
         {
-            Debug.LogError("[FogOfWar] 호환 쉐이더를 찾을 수 없습니다!");
-            return;
+            fogMaterial = fogMaterialOverride;
+        }
+        else
+        {
+            Shader shader = Shader.Find("Sprites/Default")
+                         ?? Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null)
+            {
+                Debug.LogError("[FogOfWar] 호환 셰이더를 찾을 수 없습니다!");
+                return;
+            }
+
+            fogMaterial = new Material(shader)
+            {
+                mainTexture = fogTexture,
+                renderQueue = 3000
+            };
+            fogMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            fogMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            fogMaterial.SetInt("_ZWrite",   0);
         }
 
-        fogMaterial = new Material(shader)
-        {
-            mainTexture = fogTexture,
-            renderQueue = 3000
-        };
-        fogMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        fogMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        fogMaterial.SetInt("_ZWrite",   0);
-
+        fogMaterial.mainTexture = fogTexture;
         meshRenderer.material = fogMaterial;
     }
 
@@ -333,15 +337,17 @@ public class FogOfWar : MonoBehaviour
         if (!Application.isPlaying || movementSystem == null) return;
         Vector2Int p = movementSystem.CurrentTilePosition;
 
+        // 완전 가시 범위 (사각형)
         Gizmos.color = new Color(0f, 1f, 0f, 0.2f);
         for (int x = -visibleRadius; x <= visibleRadius; x++)
-            for (int y = -(visibleRadius - Mathf.Abs(x)); y <= (visibleRadius - Mathf.Abs(x)); y++)
+            for (int y = -visibleRadius; y <= visibleRadius; y++)
                 Gizmos.DrawCube(new Vector3(p.x + x + 0.5f, p.y + y + 0.5f, 0), Vector3.one);
 
+        // 경계 범위 (사각형 테두리)
         Gizmos.color = new Color(1f, 1f, 0f, 0.2f);
         for (int x = -edgeRadius; x <= edgeRadius; x++)
-            for (int y = -(edgeRadius - Mathf.Abs(x)); y <= (edgeRadius - Mathf.Abs(x)); y++)
-                if (Mathf.Abs(x) + Mathf.Abs(y) == edgeRadius)
+            for (int y = -edgeRadius; y <= edgeRadius; y++)
+                if (Mathf.Abs(x) == edgeRadius || Mathf.Abs(y) == edgeRadius)
                     Gizmos.DrawCube(new Vector3(p.x + x + 0.5f, p.y + y + 0.5f, 0), Vector3.one);
     }
 }

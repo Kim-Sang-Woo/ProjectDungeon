@@ -1,6 +1,16 @@
 // ============================================================
-// MovementSystem.cs — A* 이동 시스템
+// MovementSystem.cs — A* 이동 시스템 (부드러운 이동)
 // 기획서 Ch.2 참조
+// 위치: Assets/Scripts/Movement/MovementSystem.cs
+// ============================================================
+// [v2 변경사항]
+//   1. 딱딱한 스냅 이동 → 부드러운 Lerp 보간 이동
+//      - 논리적 타일 위치(CurrentTilePosition)와 시각적 위치(transform.position) 분리
+//      - 이동 중 시각적으로 부드럽게 슬라이드하되, 타일 도착 판정은 정확히 유지
+//   2. A* 버그 수정: SortedSet → Dictionary + BinaryHeap 대안
+//      - 같은 position에 더 나은 gScore가 발견되었을 때 갱신 보장
+//   3. DungeonGenerator 직접 참조 → DungeonManager 참조로 변경
+//   4. 가속 공식 프레임 독립적으로 보정
 // ============================================================
 using System;
 using System.Collections;
@@ -9,7 +19,7 @@ using UnityEngine;
 
 /// <summary>
 /// 플레이어의 자동 이동을 담당하는 시스템.
-/// 클릭 시 A*(Manhattan) 경로를 계산하고 코루틴으로 타일 단위 이동한다.
+/// 클릭 시 A*(Manhattan) 경로를 계산하고 코루틴으로 타일 단위 부드러운 이동을 수행한다.
 /// </summary>
 public class MovementSystem : MonoBehaviour
 {
@@ -22,8 +32,8 @@ public class MovementSystem : MonoBehaviour
     public int accelerationThreshold = 10;
 
     [Header("참조")]
-    [Tooltip("DungeonGenerator 참조 (던전 맵 데이터 접근용)")]
-    public DungeonGenerator dungeonGenerator;
+    [Tooltip("DungeonManager 참조 (던전 맵 데이터 접근용)")]
+    public DungeonManager dungeonManager;
 
     // ─── 이벤트 ───
     /// <summary>
@@ -33,14 +43,14 @@ public class MovementSystem : MonoBehaviour
     public event Action<Vector2Int> OnTileEntered;
 
     // ─── 상태 ───
-    /// <summary>현재 플레이어의 타일 좌표</summary>
+    /// <summary>현재 플레이어의 논리적 타일 좌표</summary>
     public Vector2Int CurrentTilePosition { get; private set; }
 
     /// <summary>현재 이동 중인지 여부</summary>
     public bool IsMoving { get; private set; }
 
     private List<Vector2Int> currentPath;
-    private List<Vector2Int> pendingPath; // 재클릭 시 대기 경로
+    private List<Vector2Int> pendingPath;
     private Coroutine moveCoroutine;
     private Camera mainCamera;
 
@@ -50,10 +60,9 @@ public class MovementSystem : MonoBehaviour
     {
         mainCamera = Camera.main;
 
-        // 플레이어를 입구 위치로 초기 배치
-        if (dungeonGenerator != null)
+        if (dungeonManager != null)
         {
-            CurrentTilePosition = dungeonGenerator.startPosition;
+            CurrentTilePosition = dungeonManager.StartPosition;
             transform.position = TileToWorld(CurrentTilePosition);
             Debug.Log($"[MovementSystem] 플레이어 시작 위치: {CurrentTilePosition}");
         }
@@ -71,19 +80,15 @@ public class MovementSystem : MonoBehaviour
         if (!Input.GetMouseButtonDown(0)) return;
         if (mainCamera == null) return;
 
-        // 마우스 → 월드 → 타일 좌표 변환
         Vector3 worldPos = mainCamera.ScreenToWorldPoint(Input.mousePosition);
         Vector2Int targetTile = WorldToTile(worldPos);
 
-        // 이동 가능 여부 확인
-        if (dungeonGenerator == null || !dungeonGenerator.IsWalkable(targetTile.x, targetTile.y))
+        if (dungeonManager == null || !dungeonManager.IsWalkable(targetTile.x, targetTile.y))
             return;
 
-        // 현재 위치와 같으면 무시
         if (targetTile == CurrentTilePosition)
             return;
 
-        // 이동 시작
         MoveTo(targetTile);
     }
 
@@ -95,7 +100,6 @@ public class MovementSystem : MonoBehaviour
     /// </summary>
     public void MoveTo(Vector2Int target)
     {
-        // 경로 계산
         List<Vector2Int> path = FindPath(CurrentTilePosition, target);
 
         if (path == null || path.Count < 2)
@@ -106,19 +110,17 @@ public class MovementSystem : MonoBehaviour
 
         if (IsMoving)
         {
-            // 이동 중이면 현재 칸 완료 후 전환하도록 대기 경로에 저장
             pendingPath = path;
             return;
         }
 
-        // 새 이동 시작
         currentPath = path;
         moveCoroutine = StartCoroutine(MoveAlongPath());
     }
 
     /// <summary>
-    /// 기획서 Ch.3.2: 이동 즉시 중단.
-    /// 이벤트 발생 시 호출된다.
+    /// 이동 즉시 중단. 이벤트 발생 시 호출된다.
+    /// 현재 논리 타일 위치로 즉시 스냅한다.
     /// </summary>
     public void StopMovement()
     {
@@ -131,15 +133,15 @@ public class MovementSystem : MonoBehaviour
         currentPath = null;
         pendingPath = null;
 
-        // 현재 타일 위치로 스냅
         transform.position = TileToWorld(CurrentTilePosition);
     }
 
-    // ─── 이동 코루틴 ───
+    // ─── 이동 코루틴 (부드러운 보간 이동) ───
 
     /// <summary>
-    /// 경로를 따라 타일 단위로 이동하는 코루틴.
-    /// 칸마다 딱딱 스냅 이동. 기획서 2.1: 기본 5칸/sec, 10칸 이상 장거리 시 가속.
+    /// 경로를 따라 타일 단위로 부드럽게 이동하는 코루틴.
+    /// 각 타일 사이를 Lerp로 보간하여 슬라이드하며,
+    /// 타일 중심에 도달하면 논리적 진입 이벤트를 발생시킨다.
     /// </summary>
     private IEnumerator MoveAlongPath()
     {
@@ -148,21 +150,32 @@ public class MovementSystem : MonoBehaviour
 
         while (pathIndex < currentPath.Count)
         {
+            Vector2Int prevTile = currentPath[pathIndex - 1];
             Vector2Int nextTile = currentPath[pathIndex];
 
-            // 속도 계산 → 대기 시간 결정
+            Vector3 startWorldPos = TileToWorld(prevTile);
+            Vector3 endWorldPos = TileToWorld(nextTile);
+
+            // 속도 계산
             int remainingTiles = currentPath.Count - pathIndex;
             float currentSpeed = CalculateSpeed(remainingTiles);
-            float stepDelay = 1f / currentSpeed;
 
-            // 대기 후 칸 단위로 즉시 이동 (딱딱 이동)
-            yield return new WaitForSeconds(stepDelay);
+            // 타일 간 보간 이동
+            float progress = 0f;
+            while (progress < 1f)
+            {
+                progress += currentSpeed * Time.deltaTime;
+                progress = Mathf.Min(progress, 1f);
 
-            // 타일 도착 — 즉시 스냅
+                transform.position = Vector3.Lerp(startWorldPos, endWorldPos, progress);
+                yield return null;
+            }
+
+            // 타일 도착 — 논리적 위치 갱신
             CurrentTilePosition = nextTile;
-            transform.position = TileToWorld(CurrentTilePosition);
+            transform.position = endWorldPos; // 정확히 스냅
 
-            // 타일 진입 이벤트 발신 (EventTriggerSystem이 수신)
+            // 타일 진입 이벤트 발신 (EventTriggerSystem, FogOfWar 등이 수신)
             OnTileEntered?.Invoke(CurrentTilePosition);
 
             // 이벤트로 인해 이동이 중단되었을 수 있으므로 확인
@@ -174,22 +187,21 @@ public class MovementSystem : MonoBehaviour
             {
                 currentPath = pendingPath;
                 pendingPath = null;
-                pathIndex = 1; // 새 경로의 첫 번째 이동 칸부터
+                pathIndex = 1;
                 continue;
             }
 
             pathIndex++;
         }
 
-        // 이동 완료
         IsMoving = false;
         currentPath = null;
     }
 
     /// <summary>
-    /// 기획서 2.1 가속 공식:
-    /// currentSpeed = Mathf.Lerp(baseSpeed, maxSpeed, (remainingTiles - 10) / 20f)
-    /// 잔여 거리 10칸 미만이면 기본 속도 유지.
+    /// 가속 공식:
+    /// 잔여 거리가 accelerationThreshold 미만이면 기본 속도,
+    /// 이상이면 baseSpeed ~ maxSpeed 사이에서 보간.
     /// </summary>
     private float CalculateSpeed(int remainingTiles)
     {
@@ -203,36 +215,53 @@ public class MovementSystem : MonoBehaviour
     // ═══════════════════════════════════════════════════════
     // A* Pathfinding (Manhattan Distance, 4방향)
     // ═══════════════════════════════════════════════════════
+    // [v2 수정] SortedSet 기반 → Dictionary + List 기반
+    //   이전 구현에서 같은 position에 더 나은 gScore가 발견되어도
+    //   SortedSet에서 이전 노드를 제거하지 못하는 버그가 있었음.
+    //   새 구현은 openList에 중복 삽입을 허용하되,
+    //   closedSet으로 이미 확정된 노드를 건너뛰는 방식.
+    // ═══════════════════════════════════════════════════════
 
-    /// <summary>
-    /// A* 알고리즘으로 최단 경로를 계산한다.
-    /// 기획서 Ch.2.1: 휴리스틱은 Manhattan Distance (4방향 이동).
-    /// </summary>
     private List<Vector2Int> FindPath(Vector2Int start, Vector2Int end)
     {
-        if (dungeonGenerator == null) return null;
+        if (dungeonManager == null) return null;
 
-        var openSet = new SortedSet<AStarNode>(new AStarNodeComparer());
+        // openList: fScore 기준 정렬된 리스트 (중복 position 허용)
+        var openList = new List<AStarNode>();
         var closedSet = new HashSet<Vector2Int>();
         var cameFrom = new Dictionary<Vector2Int, Vector2Int>();
         var gScore = new Dictionary<Vector2Int, int>();
 
-        AStarNode startNode = new AStarNode(start, 0, ManhattanDistance(start, end));
-        openSet.Add(startNode);
         gScore[start] = 0;
+        openList.Add(new AStarNode(start, 0, ManhattanDistance(start, end)));
 
         Vector2Int[] directions = {
             Vector2Int.up, Vector2Int.down, Vector2Int.left, Vector2Int.right
         };
 
-        while (openSet.Count > 0)
+        while (openList.Count > 0)
         {
-            AStarNode current = openSet.Min;
-            openSet.Remove(current);
+            // fScore가 가장 작은 노드 추출
+            int bestIdx = 0;
+            for (int i = 1; i < openList.Count; i++)
+            {
+                if (openList[i].fScore < openList[bestIdx].fScore ||
+                    (openList[i].fScore == openList[bestIdx].fScore &&
+                     openList[i].gScore < openList[bestIdx].gScore))
+                {
+                    bestIdx = i;
+                }
+            }
+
+            AStarNode current = openList[bestIdx];
+            openList.RemoveAt(bestIdx);
+
+            // 이미 확정된 노드면 건너뛰기 (중복 삽입 대응)
+            if (closedSet.Contains(current.position))
+                continue;
 
             if (current.position == end)
             {
-                // 경로 역추적
                 return ReconstructPath(cameFrom, end, start);
             }
 
@@ -245,7 +274,7 @@ public class MovementSystem : MonoBehaviour
                 if (closedSet.Contains(neighbor))
                     continue;
 
-                if (!dungeonGenerator.IsWalkable(neighbor.x, neighbor.y))
+                if (!dungeonManager.IsWalkable(neighbor.x, neighbor.y))
                     continue;
 
                 int tentativeG = gScore[current.position] + 1;
@@ -255,13 +284,13 @@ public class MovementSystem : MonoBehaviour
                     cameFrom[neighbor] = current.position;
                     gScore[neighbor] = tentativeG;
                     int f = tentativeG + ManhattanDistance(neighbor, end);
-
-                    openSet.Add(new AStarNode(neighbor, tentativeG, f));
+                    // 중복 삽입 허용 — closedSet에서 걸러짐
+                    openList.Add(new AStarNode(neighbor, tentativeG, f));
                 }
             }
         }
 
-        return null; // 경로 없음
+        return null;
     }
 
     private int ManhattanDistance(Vector2Int a, Vector2Int b)
@@ -297,33 +326,17 @@ public class MovementSystem : MonoBehaviour
         }
     }
 
-    private class AStarNodeComparer : IComparer<AStarNode>
-    {
-        public int Compare(AStarNode a, AStarNode b)
-        {
-            int result = a.fScore.CompareTo(b.fScore);
-            if (result == 0) result = a.gScore.CompareTo(b.gScore);
-            if (result == 0) result = a.position.x.CompareTo(b.position.x);
-            if (result == 0) result = a.position.y.CompareTo(b.position.y);
-            return result;
-        }
-    }
-
     // ═══════════════════════════════════════════════════════
     // 좌표 변환 유틸리티
     // ═══════════════════════════════════════════════════════
 
-    /// <summary>
-    /// 타일 좌표 → 월드 좌표 변환 (타일 중심)
-    /// </summary>
+    /// <summary>타일 좌표 → 월드 좌표 변환 (타일 중심)</summary>
     private Vector3 TileToWorld(Vector2Int tilePos)
     {
         return new Vector3(tilePos.x + 0.5f, tilePos.y + 0.5f, 0f);
     }
 
-    /// <summary>
-    /// 월드 좌표 → 타일 좌표 변환
-    /// </summary>
+    /// <summary>월드 좌표 → 타일 좌표 변환</summary>
     private Vector2Int WorldToTile(Vector3 worldPos)
     {
         return new Vector2Int(Mathf.FloorToInt(worldPos.x), Mathf.FloorToInt(worldPos.y));

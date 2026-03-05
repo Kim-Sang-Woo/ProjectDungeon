@@ -1,6 +1,11 @@
 // ============================================================
 // EventPopupUI.cs — 이벤트 팝업 UI
 // 기획서 Ch.5.1 참조
+// 위치: Assets/Scripts/UI/EventPopupUI.cs
+// ============================================================
+// [참고] TextMeshPro(TMPro) 전환을 권장하지만,
+//        TMPro 패키지 설치 여부에 따라 달라지므로 현재는 UnityEngine.UI.Text 유지.
+//        전환 시 using TMPro; 추가 및 Text → TextMeshProUGUI 변경.
 // ============================================================
 using UnityEngine;
 using UnityEngine.UI;
@@ -24,10 +29,8 @@ public class EventPopupUI : MonoBehaviour
 
     private void Awake()
     {
-        // 시작 시 비활성화 (기획서: 기본 비활성)
         gameObject.SetActive(false);
 
-        // 확인 버튼 클릭 이벤트 등록
         if (confirmButton != null)
         {
             confirmButton.onClick.AddListener(HideEvent);
@@ -43,19 +46,16 @@ public class EventPopupUI : MonoBehaviour
 
         gameObject.SetActive(true);
 
-        // 이벤트 타입 텍스트
         if (eventTypeText != null)
         {
             eventTypeText.text = GetEventTypeDisplayName(eventData.eventType);
         }
 
-        // 이벤트 이름 텍스트
         if (eventNameText != null)
         {
             eventNameText.text = eventData.displayName;
         }
 
-        // 아이콘 (있을 경우)
         if (eventIcon != null)
         {
             if (eventData.iconSprite != null)
@@ -78,9 +78,6 @@ public class EventPopupUI : MonoBehaviour
         gameObject.SetActive(false);
     }
 
-    /// <summary>
-    /// 이벤트 타입의 한글 표시명을 반환한다.
-    /// </summary>
     private string GetEventTypeDisplayName(DungeonEventType type)
     {
         switch (type)

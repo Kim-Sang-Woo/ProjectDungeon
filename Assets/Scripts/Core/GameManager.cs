@@ -1,7 +1,14 @@
 // ============================================================
 // GameManager.cs — 싱글톤 게임 매니저
 // 기획서 Ch.5.1 참조 — Script Execution Order: -100
+// 위치: Assets/Scripts/Core/GameManager.cs
 // ============================================================
+// [v2 변경사항]
+//   - switch-case → Dictionary<DungeonEventType, Action> 핸들러 등록
+//   - 새 이벤트 타입 추가 시 RegisterHandler()만 호출하면 됨
+// ============================================================
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -13,6 +20,9 @@ public class GameManager : MonoBehaviour
     // ─── 싱글톤 ───
     public static GameManager Instance { get; private set; }
 
+    // ─── 이벤트 핸들러 레지스트리 ───
+    private Dictionary<DungeonEventType, Action<DungeonEventData>> eventHandlers;
+
     private void Awake()
     {
         if (Instance != null && Instance != this)
@@ -22,6 +32,32 @@ public class GameManager : MonoBehaviour
         }
         Instance = this;
         DontDestroyOnLoad(gameObject);
+
+        InitDefaultHandlers();
+    }
+
+    // ─── 핸들러 초기화 ───
+
+    private void InitDefaultHandlers()
+    {
+        eventHandlers = new Dictionary<DungeonEventType, Action<DungeonEventData>>
+        {
+            { DungeonEventType.COMBAT,   HandleCombatEvent },
+            { DungeonEventType.TRAP,     HandleTrapEvent },
+            { DungeonEventType.TREASURE, HandleTreasureEvent },
+            { DungeonEventType.NPC,      HandleNPCEvent },
+            { DungeonEventType.SHRINE,   HandleShrineEvent },
+            { DungeonEventType.SPECIAL,  HandleSpecialEvent },
+        };
+    }
+
+    /// <summary>
+    /// 외부 시스템에서 커스텀 핸들러를 등록할 수 있다.
+    /// 기존 핸들러가 있으면 덮어쓴다.
+    /// </summary>
+    public void RegisterHandler(DungeonEventType type, Action<DungeonEventData> handler)
+    {
+        eventHandlers[type] = handler;
     }
 
     // ─── 이벤트 처리 ───
@@ -40,33 +76,17 @@ public class GameManager : MonoBehaviour
 
         Debug.Log($"[GameManager] 이벤트 발생 — 타입: {eventData.eventType}, 이름: {eventData.displayName}");
 
-        switch (eventData.eventType)
+        if (eventHandlers.TryGetValue(eventData.eventType, out var handler))
         {
-            case DungeonEventType.COMBAT:
-                HandleCombatEvent(eventData);
-                break;
-            case DungeonEventType.TRAP:
-                HandleTrapEvent(eventData);
-                break;
-            case DungeonEventType.TREASURE:
-                HandleTreasureEvent(eventData);
-                break;
-            case DungeonEventType.NPC:
-                HandleNPCEvent(eventData);
-                break;
-            case DungeonEventType.SHRINE:
-                HandleShrineEvent(eventData);
-                break;
-            case DungeonEventType.SPECIAL:
-                HandleSpecialEvent(eventData);
-                break;
-            default:
-                Debug.LogWarning($"[GameManager] 알 수 없는 이벤트 타입: {eventData.eventType}");
-                break;
+            handler.Invoke(eventData);
+        }
+        else
+        {
+            Debug.LogWarning($"[GameManager] 등록되지 않은 이벤트 타입: {eventData.eventType}");
         }
     }
 
-    // ─── 이벤트 타입별 핸들러 (v1.0: 콘솔 출력만 수행) ───
+    // ─── 이벤트 타입별 기본 핸들러 (v1.0: 콘솔 출력만 수행) ───
 
     private void HandleCombatEvent(DungeonEventData data)
     {

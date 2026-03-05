@@ -1,6 +1,7 @@
 // ============================================================
 // RoomData.cs — 방 인스턴스 데이터 (런타임 생성)
 // 기획서 Ch.0.2 참조
+// 위치: Assets/Scripts/Data/RoomData.cs
 // ============================================================
 using System.Collections.Generic;
 using UnityEngine;

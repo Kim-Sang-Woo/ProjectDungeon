@@ -1,6 +1,12 @@
 // ============================================================
 // EventTriggerSystem.cs — 이벤트 트리거 시스템
 // 기획서 Ch.3 참조
+// 위치: Assets/Scripts/Events/EventTriggerSystem.cs
+// ============================================================
+// [v2 변경사항]
+//   - DungeonGenerator 직접 참조 → DungeonManager 참조
+//   - TileData가 class로 변경되어 직접 필드 수정이 원본에 반영됨
+//     → SetTileData() 호출 불필요
 // ============================================================
 using UnityEngine;
 
@@ -16,11 +22,10 @@ public class EventTriggerSystem : MonoBehaviour
     [Tooltip("이벤트 발생 시 표시할 팝업 UI")]
     public EventPopupUI eventPopupUI;
     [Tooltip("던전 데이터 접근용")]
-    public DungeonGenerator dungeonGenerator;
+    public DungeonManager dungeonManager;
 
     private void Start()
     {
-        // 기획서 5.2: Start()에서 OnTileEntered 이벤트 구독
         if (movementSystem != null)
         {
             movementSystem.OnTileEntered += OnPlayerTileEntered;
@@ -34,30 +39,26 @@ public class EventTriggerSystem : MonoBehaviour
 
     private void OnDestroy()
     {
-        // 이벤트 구독 해제
         if (movementSystem != null)
         {
             movementSystem.OnTileEntered -= OnPlayerTileEntered;
         }
     }
 
-    /// <summary>
-    /// 플레이어가 타일에 진입했을 때 호출되는 콜백
-    /// </summary>
     private void OnPlayerTileEntered(Vector2Int tilePos)
     {
         CheckAndTriggerEvent(tilePos);
     }
 
     /// <summary>
-    /// 기획서 Ch.3: 타일의 이벤트 여부를 확인하고 이벤트를 트리거한다.
+    /// 타일의 이벤트 여부를 확인하고 이벤트를 트리거한다.
     /// 이벤트 발생 시 이동을 즉시 중단하고 GameManager에 통보한다.
     /// </summary>
     public void CheckAndTriggerEvent(Vector2Int tilePos)
     {
-        if (dungeonGenerator == null) return;
+        if (dungeonManager == null) return;
 
-        TileData tile = dungeonGenerator.GetTileData(tilePos.x, tilePos.y);
+        TileData tile = dungeonManager.GetTile(tilePos.x, tilePos.y);
 
         // 이벤트가 없거나 이미 소진된 경우 → 이동 계속
         if (tile.eventData == null)
@@ -68,15 +69,14 @@ public class EventTriggerSystem : MonoBehaviour
 
         // ─── 이벤트 발생! ───
 
-        // 1. 이동 즉시 중단 (기획서 3.2: STOP)
+        // 1. 이동 즉시 중단
         movementSystem.StopMovement();
-        Debug.Log($"[EventTriggerSystem] ⚡ 이벤트 발생! 위치: {tilePos}, 타입: {tile.eventData.eventType}, 이름: {tile.eventData.displayName}");
+        Debug.Log($"[EventTriggerSystem] 이벤트 발생! 위치: {tilePos}, 타입: {tile.eventData.eventType}, 이름: {tile.eventData.displayName}");
 
-        // 2. 이벤트 소진 처리 (기획서 3.2)
+        // 2. 이벤트 소진 처리 — TileData가 class이므로 직접 수정이 원본에 반영됨
         tile.isEventConsumed = true;
-        dungeonGenerator.SetTileData(tilePos.x, tilePos.y, tile);
 
-        // 3. GameManager에 이벤트 통보 (기획서 0.6)
+        // 3. GameManager에 이벤트 통보
         if (GameManager.Instance != null)
         {
             GameManager.Instance.HandleDungeonEvent(tile.eventData);

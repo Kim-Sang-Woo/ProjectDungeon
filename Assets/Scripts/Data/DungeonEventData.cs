@@ -1,6 +1,7 @@
 // ============================================================
 // DungeonEventData.cs — 이벤트 정의 (ScriptableObject)
 // 기획서 Ch.0.4 참조
+// 위치: Assets/Scripts/Data/DungeonEventData.cs
 // ============================================================
 using UnityEngine;
 
