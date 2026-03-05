@@ -39,5 +39,7 @@ public enum DungeonEventType
 public enum DungeonObjectType
 {
     TREASURE_CHEST, // 보물 상자 — 열기
+    STAIRS_DOWN,    // 내려가는 계단 — 다음 층으로
+    STAIRS_UP,      // 올라가는 계단 — 이전 층으로
     // 추후 확장: NPC_MERCHANT, ALTAR, SIGN, ...
 }

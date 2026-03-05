@@ -62,6 +62,8 @@ public class DungeonObjectData : ScriptableObject
         switch (objectType)
         {
             case DungeonObjectType.TREASURE_CHEST: return "열기";
+            case DungeonObjectType.STAIRS_DOWN:    return "내려가기";
+            case DungeonObjectType.STAIRS_UP:      return "올라가기";
             default:                               return "상호작용";
         }
     }

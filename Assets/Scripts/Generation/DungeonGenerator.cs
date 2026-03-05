@@ -2,10 +2,10 @@
 // DungeonGenerator.cs — 던전 생성 시스템
 // 위치: Assets/Scripts/Generation/DungeonGenerator.cs
 // ============================================================
-// [v2.2 변경사항]
-//   - objectPool 필드 추가: 오브젝트(보물 상자 등) 배치 풀
-//   - PlaceObjects() 메서드 추가: 가중치 기반 오브젝트 배치
-//     이벤트와 오브젝트는 같은 타일에 중복 배치되지 않음
+// [v2.3 변경사항]
+//   - stairsDownObject / stairsUpObject 필드 추가
+//   - PlaceStairObjects(): 계단 위치에 오브젝트 고정 배치
+//     (DungeonRenderer의 Tilemap 계단 타일 방식 대체)
 // ============================================================
 using System.Collections.Generic;
 using System.Linq;
@@ -28,6 +28,13 @@ public class DungeonGenerator : MonoBehaviour
     [Tooltip("오브젝트 배치 밀도 (walkable 타일 대비 비율, 0.0~1.0)")]
     [Range(0f, 0.3f)]
     public float objectDensity = 0.03f;
+
+    [Header("계단 오브젝트")]
+    [Tooltip("내려가는 계단 오브젝트 데이터 (EXIT 위치에 고정 배치)")]
+    public DungeonObjectData stairsDownObject;
+
+    [Tooltip("올라가는 계단 오브젝트 데이터 (START 위치에 고정 배치)")]
+    public DungeonObjectData stairsUpObject;
 
     private TileData[,] grid;
     private List<RoomData> rooms = new List<RoomData>();
@@ -97,6 +104,7 @@ public class DungeonGenerator : MonoBehaviour
         CarveCorridors(finalEdges);
         RecordConnections(finalEdges);
         PlaceStairs(mstEdges);
+        PlaceStairObjects();
         PlaceEvents(data.eventDensity);
         PlaceObjects();
     }
@@ -367,7 +375,41 @@ public class DungeonGenerator : MonoBehaviour
     }
 
     // ═══════════════════════════════════════════════════════
-    // Step 8: 오브젝트 배치 (보물 상자 등)
+    // Step 8: 계단 오브젝트 고정 배치
+    // ═══════════════════════════════════════════════════════
+
+    /// <summary>
+    /// START(올라가는 계단) / EXIT(내려가는 계단) 위치에
+    /// 계단 오브젝트를 고정 배치한다.
+    /// DungeonRenderer의 Tilemap 계단 타일을 대체한다.
+    /// </summary>
+    private void PlaceStairObjects()
+    {
+        if (stairsDownObject != null)
+        {
+            grid[exitPosition.x, exitPosition.y].placedObject       = stairsDownObject;
+            grid[exitPosition.x, exitPosition.y].isObjectInteracted = false;
+            Debug.Log($"[DungeonGenerator] 내려가는 계단 오브젝트 배치: {exitPosition}");
+        }
+        else
+        {
+            Debug.LogWarning("[DungeonGenerator] stairsDownObject가 할당되지 않았습니다.");
+        }
+
+        if (stairsUpObject != null)
+        {
+            grid[startPosition.x, startPosition.y].placedObject       = stairsUpObject;
+            grid[startPosition.x, startPosition.y].isObjectInteracted = false;
+            Debug.Log($"[DungeonGenerator] 올라가는 계단 오브젝트 배치: {startPosition}");
+        }
+        else
+        {
+            Debug.LogWarning("[DungeonGenerator] stairsUpObject가 할당되지 않았습니다.");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // Step 9: 오브젝트 배치 (보물 상자 등)
     // ═══════════════════════════════════════════════════════
 
     /// <summary>
