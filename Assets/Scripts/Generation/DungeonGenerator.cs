@@ -119,8 +119,8 @@ public class DungeonGenerator : MonoBehaviour
 
         for (int attempt = 0; attempt < MAX_ROOM_PLACEMENT_ATTEMPTS && rooms.Count < targetRoomCount; attempt++)
         {
-            int width = Random.Range(2, 11);
-            int height = Random.Range(2, 11);
+            int width = Random.Range(data.roomWidthMin,  data.roomWidthMax  + 1);
+            int height = Random.Range(data.roomHeightMin, data.roomHeightMax + 1);
             int x = Random.Range(1, data.mapWidth - width - 1);
             int y = Random.Range(1, data.mapHeight - height - 1);
 

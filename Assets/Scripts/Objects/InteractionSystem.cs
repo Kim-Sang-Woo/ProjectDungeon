@@ -2,11 +2,18 @@
 // InteractionSystem.cs — 오브젝트 인터렉션 시스템
 // 위치: Assets/Scripts/Objects/InteractionSystem.cs
 // ============================================================
-// [v1.3 변경사항]
-//   - 계단 인터렉션 추가 (StairSystem.cs 대체)
-//     STAIRS_DOWN: LockInput → GoToNextFloor
-//     STAIRS_UP  : LockInput → GoToPreviousFloor
-//   - StairSystem.cs는 씬에서 제거해도 됨
+// [v1.4 변경사항]
+//   - ShowInteraction() 콜백을 Action → Action<string>으로 변경
+//     actionId를 받아 처리 분기
+//   - objectType 기반 switch → actionId 기반 switch로 변경
+//     DungeonObjectData.actions에서 정의한 actionId로 동작 결정
+//
+// [표준 actionId 목록]
+//   "open"     — 보물 상자 열기
+//   "go_down"  — 내려가는 계단
+//   "go_up"    — 올라가는 계단
+//   "ignore"   — 아무것도 하지 않고 UI 닫기
+//   (새 액션 추가 시 HandleAction() switch에 case 추가)
 // ============================================================
 using UnityEngine;
 
@@ -83,56 +90,73 @@ public class InteractionSystem : MonoBehaviour
     {
         if (interactionUI == null) return;
 
+        // actionId를 받아 처리하는 콜백 전달
         interactionUI.ShowInteraction(
             tile.placedObject,
-            () => HandleInteraction(tilePos)
+            (actionId) => HandleAction(tilePos, actionId)
         );
     }
 
-    // ─── 인터렉션 처리 ───
+    // ─── actionId 기반 처리 분기 ───
 
-    private void HandleInteraction(Vector2Int tilePos)
+    /// <summary>
+    /// 액션 링크 클릭 시 actionId로 동작을 결정한다.
+    /// 새 actionId 추가 시 case를 추가한다.
+    /// </summary>
+    private void HandleAction(Vector2Int tilePos, string actionId)
     {
-        TileData tile = dungeonManager.GetTile(tilePos.x, tilePos.y);
-        if (tile.placedObject == null) return;
+        Debug.Log($"[InteractionSystem] 액션 실행 — tilePos:{tilePos} actionId:{actionId}");
 
-        switch (tile.placedObject.objectType)
+        switch (actionId)
         {
-            case DungeonObjectType.TREASURE_CHEST:
-                HandleTreasureChest(tilePos, tile, tile.placedObject);
+            case "open":
+                HandleOpen(tilePos);
                 break;
-            case DungeonObjectType.STAIRS_DOWN:
-                HandleStairsDown();
+
+            case "go_down":
+                HandleGoDown();
                 break;
-            case DungeonObjectType.STAIRS_UP:
-                HandleStairsUp();
+
+            case "go_up":
+                HandleGoUp();
                 break;
+
+            case "ignore":
+                // 아무것도 하지 않음 — UI는 ShowInteraction 콜백에서 이미 Hide() 호출됨
+                Debug.Log("[InteractionSystem] 내버려 두기 — 아무 행동 없음");
+                break;
+
             default:
-                Debug.LogWarning($"[InteractionSystem] 처리되지 않은 타입: {tile.placedObject.objectType}");
+                Debug.LogWarning($"[InteractionSystem] 처리되지 않은 actionId: '{actionId}'");
                 break;
         }
     }
 
-    private void HandleTreasureChest(Vector2Int tilePos, TileData tile, DungeonObjectData data)
+    // ─── 액션별 처리 ───
+
+    private void HandleOpen(Vector2Int tilePos)
     {
-        Debug.Log($"[InteractionSystem] 보물 상자 열기! 위치:{tilePos} 이름:{data.displayName}");
+        TileData tile = dungeonManager.GetTile(tilePos.x, tilePos.y);
+        if (tile.placedObject == null) return;
+
+        Debug.Log($"[InteractionSystem] 열기 — {tile.placedObject.displayName}");
 
         tile.isObjectInteracted = true;
 
-        if (data.isOneTime && dungeonObjectSpawner != null)
+        if (tile.placedObject.isOneTime && dungeonObjectSpawner != null)
             dungeonObjectSpawner.RemoveAt(tilePos);
 
         // TODO: 보상 처리
     }
 
-    private void HandleStairsDown()
+    private void HandleGoDown()
     {
         Debug.Log("[InteractionSystem] 내려가는 계단 → 다음 층");
         movementSystem.LockInput();
         dungeonManager.GoToNextFloor();
     }
 
-    private void HandleStairsUp()
+    private void HandleGoUp()
     {
         if (dungeonManager.CurrentFloorIndex <= 0)
         {

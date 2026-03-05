@@ -22,6 +22,16 @@ public class DungeonFloorData : ScriptableObject
     [Tooltip("최대 방 수")]
     public int roomCountMax = 10;
 
+    [Header("방 크기 설정")]
+    [Tooltip("방 최소 가로 타일 수")]
+    public int roomWidthMin  = 4;
+    [Tooltip("방 최대 가로 타일 수")]
+    public int roomWidthMax  = 10;
+    [Tooltip("방 최소 세로 타일 수")]
+    public int roomHeightMin = 4;
+    [Tooltip("방 최대 세로 타일 수")]
+    public int roomHeightMax = 10;
+
     [Header("맵 크기")]
     [Tooltip("맵 가로 타일 수")]
     public int mapWidth = 60;

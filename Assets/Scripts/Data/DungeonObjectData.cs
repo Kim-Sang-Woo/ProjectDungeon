@@ -2,30 +2,42 @@
 // DungeonObjectData.cs — 던전 오브젝트 데이터 (ScriptableObject)
 // 위치: Assets/Scripts/Data/DungeonObjectData.cs
 // ============================================================
-// [개요]
-//   던전 안에 배치되는 상호작용 오브젝트(보물 상자 등)의
-//   정의 데이터를 담는 ScriptableObject.
-//
-// [에셋 생성]
-//   Project 창 우클릭
-//   → Create → Dungeon → Object Data
-//   → Assets/Data/Objects/ 폴더에 저장 권장
+// [v2 변경사항]
+//   - ObjectAction 구조체 추가: 액션 ID + 표시 라벨을 쌍으로 정의
+//   - actions 배열: Inspector에서 직접 액션 목록을 구성
+//   - GetActionLabel() 제거 → actions 배열로 완전 대체
 //
 // [Inspector 설정 예시 — 보물 상자]
-//   objectId   : treasure_chest_basic
-//   objectType : TREASURE_CHEST
-//   displayName: 낡은 보물 상자
-//   description: 오래된 나무 상자다. 무언가 들어있을 것 같다.
-//   sprite     : (보물상자 스프라이트 할당)
-//   isOneTime  : true  (한 번 열면 사라짐)
+//   Actions:
+//     [0] actionId: open    / label: 열기
+//     [1] actionId: ignore  / label: 내버려 두기
+//
+// [Inspector 설정 예시 — 계단]
+//   Actions:
+//     [0] actionId: go_down / label: 내려가기
+//     [1] actionId: ignore  / label: 그냥 있기
 // ============================================================
 using UnityEngine;
+
+/// <summary>
+/// 인터렉션 UI에 표시되는 단일 액션.
+/// actionId는 InteractionSystem의 처리 분기 키로 사용된다.
+/// </summary>
+[System.Serializable]
+public class ObjectAction
+{
+    [Tooltip("처리 분기용 ID (예: open, ignore, go_down, go_up)")]
+    public string actionId;
+
+    [Tooltip("UI에 표시되는 텍스트 (예: 열기, 내버려 두기)")]
+    public string label;
+}
 
 [CreateAssetMenu(fileName = "Object_New", menuName = "Dungeon/Object Data")]
 public class DungeonObjectData : ScriptableObject
 {
     [Header("오브젝트 식별")]
-    [Tooltip("고유 ID (예: treasure_chest_basic, treasure_chest_rare)")]
+    [Tooltip("고유 ID (예: treasure_chest_basic)")]
     public string objectId;
 
     [Tooltip("오브젝트 타입 — 인터렉션 방식 결정")]
@@ -53,18 +65,7 @@ public class DungeonObjectData : ScriptableObject
     [Min(0)]
     public int spawnWeight = 5;
 
-    /// <summary>
-    /// 오브젝트 타입에 따라 인터렉션 UI에 표시할 액션 텍스트를 반환한다.
-    /// 새 타입 추가 시 여기에 case를 추가한다.
-    /// </summary>
-    public string GetActionLabel()
-    {
-        switch (objectType)
-        {
-            case DungeonObjectType.TREASURE_CHEST: return "열기";
-            case DungeonObjectType.STAIRS_DOWN:    return "내려가기";
-            case DungeonObjectType.STAIRS_UP:      return "올라가기";
-            default:                               return "상호작용";
-        }
-    }
+    [Header("액션 목록")]
+    [Tooltip("인터렉션 UI에 표시할 액션 목록. 순서대로 표시된다.")]
+    public ObjectAction[] actions;
 }
