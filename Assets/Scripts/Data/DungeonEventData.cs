@@ -3,12 +3,13 @@
 // 기획서 Ch.0.4 참조
 // 위치: Assets/Scripts/Data/DungeonEventData.cs
 // ============================================================
+// [v2 변경사항]
+//   - spawnWeight 필드 추가: 이벤트 배치 시 가중치 기반 확률 선택
+//     weight가 높을수록 자주 배치됨
+//     예: COMBAT(10), TRAP(5), TREASURE(3) → 전투가 가장 자주 발생
+// ============================================================
 using UnityEngine;
 
-/// <summary>
-/// 던전 내 개별 이벤트를 정의하는 ScriptableObject.
-/// Unity 에디터에서 Assets/Data/Events/ 폴더에 에셋으로 생성하여 사용한다.
-/// </summary>
 [CreateAssetMenu(fileName = "Event_New", menuName = "Dungeon/Event Data")]
 public class DungeonEventData : ScriptableObject
 {
@@ -29,5 +30,8 @@ public class DungeonEventData : ScriptableObject
     [Tooltip("이벤트 발생 시 표시 아이콘 (선택)")]
     public Sprite iconSprite;
 
-    // TODO: 이벤트별 세부 파라미터는 서브클래스 또는 별도 기획서에서 확장
+    [Header("배치 확률")]
+    [Tooltip("배치 가중치 (높을수록 자주 배치됨). 0이면 배치되지 않음.")]
+    [Min(0)]
+    public int spawnWeight = 10;
 }
