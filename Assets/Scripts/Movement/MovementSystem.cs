@@ -55,16 +55,55 @@ public class MovementSystem : MonoBehaviour
     {
         if (!Input.GetMouseButtonDown(0)) return;
         if (mainCamera == null) return;
+        if (dungeonManager == null) return;
 
         if (IsMoving) { stopRequested = true; return; }
 
         Vector3 worldPos = mainCamera.ScreenToWorldPoint(Input.mousePosition);
         Vector2Int targetTile = WorldToTile(worldPos);
 
-        if (dungeonManager == null || !dungeonManager.IsWalkable(targetTile.x, targetTile.y)) return;
+        // 갈 수 없는 곳이면 가장 가까운 walkable 타일을 찾는다
+        if (!dungeonManager.IsWalkable(targetTile.x, targetTile.y))
+        {
+            targetTile = FindNearestWalkable(targetTile);
+            if (targetTile.x == -1) return; // 주변에 walkable 없음
+        }
+
         if (targetTile == CurrentTilePosition) return;
 
         MoveTo(targetTile);
+    }
+
+    /// <summary>
+    /// 클릭한 지점에서 BFS로 가장 가까운 walkable 타일을 찾는다.
+    /// 최대 탐색 반경을 제한하여 성능을 보호한다.
+    /// </summary>
+    private Vector2Int FindNearestWalkable(Vector2Int origin)
+    {
+        const int MAX_SEARCH_RADIUS = 10;
+
+        // Chebyshev 거리 순으로 탐색 (가까운 것부터)
+        for (int radius = 1; radius <= MAX_SEARCH_RADIUS; radius++)
+        {
+            // 현재 반경의 사각형 테두리를 순회
+            for (int dx = -radius; dx <= radius; dx++)
+            {
+                for (int dy = -radius; dy <= radius; dy++)
+                {
+                    // 테두리만 (이전 반경은 이미 탐색함)
+                    if (Mathf.Abs(dx) != radius && Mathf.Abs(dy) != radius)
+                        continue;
+
+                    int nx = origin.x + dx;
+                    int ny = origin.y + dy;
+
+                    if (dungeonManager.IsWalkable(nx, ny))
+                        return new Vector2Int(nx, ny);
+                }
+            }
+        }
+
+        return new Vector2Int(-1, -1); // 못 찾음
     }
 
     public void MoveTo(Vector2Int target)
