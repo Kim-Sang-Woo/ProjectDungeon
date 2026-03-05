@@ -3,14 +3,11 @@
 // 기획서 Ch.2 참조
 // 위치: Assets/Scripts/Movement/MovementSystem.cs
 // ============================================================
-// [v3 변경사항]
-//   1. 4방향 → 8방향 이동 (대각선 포함)
-//   2. A* 휴리스틱: Manhattan → Chebyshev (8방향 최적)
-//   3. 이동 비용: 직선 10, 대각선 14 (√2 ≈ 1.414 정수 근사)
-//   4. 대각선 벽 끼기 방지 (Wall Cutting 방지)
-//      - 대각선 이동 시 인접 두 직교 타일이 모두 walkable이어야 허용
-//      - 예: (0,0)→(1,1)로 이동하려면 (1,0)과 (0,1) 둘 다 walkable
-//   5. 대각선 이동 시 시각적 속도 보정 (√2배 거리 반영)
+// [v3.1 변경사항]
+//   - 이동 중 클릭 시 즉시 정지 (새 이동 명령 수행하지 않음)
+//   - 완전히 정지된 후에만 새 이동 명령을 수락
+//   - pendingPath 로직 완전 제거 (빠른 클릭 시 텔레포트 버그 원인)
+//   - 정지 요청 시 현재 보간 중인 다음 타일까지 이동 완료 후 정지
 // ============================================================
 using System;
 using System.Collections;
@@ -39,27 +36,26 @@ public class MovementSystem : MonoBehaviour
     public bool IsMoving { get; private set; }
 
     private List<Vector2Int> currentPath;
-    private List<Vector2Int> pendingPath;
     private Coroutine moveCoroutine;
     private Camera mainCamera;
 
+    // 이동 중 정지 요청 플래그
+    private bool stopRequested;
+
     // ─── 8방향 정의 ───
-    // 직선 4방향 + 대각선 4방향
     private static readonly Vector2Int[] AllDirections = {
-        new Vector2Int( 0,  1), // 상
-        new Vector2Int( 0, -1), // 하
-        new Vector2Int(-1,  0), // 좌
-        new Vector2Int( 1,  0), // 우
-        new Vector2Int( 1,  1), // 우상
-        new Vector2Int(-1,  1), // 좌상
-        new Vector2Int( 1, -1), // 우하
-        new Vector2Int(-1, -1), // 좌하
+        new Vector2Int( 0,  1),
+        new Vector2Int( 0, -1),
+        new Vector2Int(-1,  0),
+        new Vector2Int( 1,  0),
+        new Vector2Int( 1,  1),
+        new Vector2Int(-1,  1),
+        new Vector2Int( 1, -1),
+        new Vector2Int(-1, -1),
     };
 
-    // A* 비용 상수 (정수 연산으로 부동소수점 오차 방지)
     private const int COST_STRAIGHT = 10;
-    private const int COST_DIAGONAL = 14; // √2 * 10 ≈ 14.14
-
+    private const int COST_DIAGONAL = 14;
     private static readonly float SQRT2 = Mathf.Sqrt(2f);
 
     // ─── 초기화 ───
@@ -88,6 +84,13 @@ public class MovementSystem : MonoBehaviour
         if (!Input.GetMouseButtonDown(0)) return;
         if (mainCamera == null) return;
 
+        // ─── 이동 중이면 정지 요청만 하고 새 명령은 무시 ───
+        if (IsMoving)
+        {
+            stopRequested = true;
+            return;
+        }
+
         Vector3 worldPos = mainCamera.ScreenToWorldPoint(Input.mousePosition);
         Vector2Int targetTile = WorldToTile(worldPos);
 
@@ -102,8 +105,14 @@ public class MovementSystem : MonoBehaviour
 
     // ─── 공용 메서드 ───
 
+    /// <summary>
+    /// 목적지로 A* 경로를 계산하고 자동 이동을 시작한다.
+    /// 이동 중에는 무시된다. 완전 정지 후에만 동작한다.
+    /// </summary>
     public void MoveTo(Vector2Int target)
     {
+        if (IsMoving) return;
+
         List<Vector2Int> path = FindPath(CurrentTilePosition, target);
 
         if (path == null || path.Count < 2)
@@ -112,16 +121,15 @@ public class MovementSystem : MonoBehaviour
             return;
         }
 
-        if (IsMoving)
-        {
-            pendingPath = path;
-            return;
-        }
-
         currentPath = path;
+        stopRequested = false;
         moveCoroutine = StartCoroutine(MoveAlongPath());
     }
 
+    /// <summary>
+    /// 이벤트 발생 시 호출되는 즉시 정지.
+    /// 코루틴을 강제 중단하고 현재 논리 타일 위치로 스냅한다.
+    /// </summary>
     public void StopMovement()
     {
         if (moveCoroutine != null)
@@ -131,12 +139,12 @@ public class MovementSystem : MonoBehaviour
         }
         IsMoving = false;
         currentPath = null;
-        pendingPath = null;
+        stopRequested = false;
 
         transform.position = TileToWorld(CurrentTilePosition);
     }
 
-    // ─── 이동 코루틴 (부드러운 보간, 대각선 속도 보정) ───
+    // ─── 이동 코루틴 ───
 
     private IEnumerator MoveAlongPath()
     {
@@ -145,29 +153,43 @@ public class MovementSystem : MonoBehaviour
 
         while (pathIndex < currentPath.Count)
         {
+            // 다음 칸 이동 시작 전 정지 요청 확인
+            if (stopRequested)
+            {
+                stopRequested = false;
+                break;
+            }
+
             Vector2Int prevTile = currentPath[pathIndex - 1];
             Vector2Int nextTile = currentPath[pathIndex];
 
             Vector3 startWorldPos = TileToWorld(prevTile);
             Vector3 endWorldPos = TileToWorld(nextTile);
 
-            // 대각선 여부 판정
             Vector2Int delta = nextTile - prevTile;
             bool isDiagonal = (delta.x != 0 && delta.y != 0);
-
-            // 대각선은 실제 월드 거리가 √2배이므로 이동 시간을 보정
-            // speed는 "칸/sec"이므로, 대각선 1칸의 월드 거리가 √2인 것을 반영
             float tileDistance = isDiagonal ? SQRT2 : 1f;
 
-            // 속도 계산
             int remainingTiles = currentPath.Count - pathIndex;
             float currentSpeed = CalculateSpeed(remainingTiles);
 
-            // 보간 이동: progress는 0→1, 실제 이동 속도는 tileDistance를 반영
+            // 타일 간 보간 이동
             float progress = 0f;
+            bool stoppingThisTile = false;
+
             while (progress < 1f)
             {
-                progress += (currentSpeed / tileDistance) * Time.deltaTime;
+                // 정지 요청 감지 → 현재 칸까지는 빠르게 완료
+                if (stopRequested && !stoppingThisTile)
+                {
+                    stoppingThisTile = true;
+                }
+
+                float speed = stoppingThisTile
+                    ? (baseSpeed * 3f)  // 빠르게 현재 칸 완료
+                    : currentSpeed;
+
+                progress += (speed / tileDistance) * Time.deltaTime;
                 progress = Mathf.Min(progress, 1f);
 
                 transform.position = Vector3.Lerp(startWorldPos, endWorldPos, progress);
@@ -178,17 +200,18 @@ public class MovementSystem : MonoBehaviour
             CurrentTilePosition = nextTile;
             transform.position = endWorldPos;
 
+            // 타일 진입 이벤트
             OnTileEntered?.Invoke(CurrentTilePosition);
 
+            // StopMovement()가 호출되었을 수 있음 (이벤트 시스템에 의해)
             if (!IsMoving)
                 yield break;
 
-            if (pendingPath != null)
+            // 정지 요청이 있었으면 이 타일에서 멈춤
+            if (stoppingThisTile || stopRequested)
             {
-                currentPath = pendingPath;
-                pendingPath = null;
-                pathIndex = 1;
-                continue;
+                stopRequested = false;
+                break;
             }
 
             pathIndex++;
@@ -196,6 +219,7 @@ public class MovementSystem : MonoBehaviour
 
         IsMoving = false;
         currentPath = null;
+        stopRequested = false;
     }
 
     private float CalculateSpeed(int remainingTiles)
@@ -209,15 +233,6 @@ public class MovementSystem : MonoBehaviour
 
     // ═══════════════════════════════════════════════════════
     // A* Pathfinding (Chebyshev Distance, 8방향)
-    // ═══════════════════════════════════════════════════════
-    //
-    // 8방향 A*:
-    //   - 직선 비용: 10, 대각선 비용: 14
-    //   - 휴리스틱: Chebyshev Distance (8방향 최적)
-    //   - 대각선 벽 끼기 방지 (Wall Cutting Prevention):
-    //     (x,y)에서 (x+dx, y+dy)로 대각선 이동 시
-    //     (x+dx, y)와 (x, y+dy) 둘 다 walkable이어야 허용
-    //
     // ═══════════════════════════════════════════════════════
 
     private List<Vector2Int> FindPath(Vector2Int start, Vector2Int end)
@@ -234,7 +249,6 @@ public class MovementSystem : MonoBehaviour
 
         while (openList.Count > 0)
         {
-            // fScore가 가장 작은 노드 추출
             int bestIdx = 0;
             for (int i = 1; i < openList.Count; i++)
             {
@@ -257,7 +271,6 @@ public class MovementSystem : MonoBehaviour
 
             closedSet.Add(current.position);
 
-            // 8방향 이웃 탐색
             foreach (var dir in AllDirections)
             {
                 Vector2Int neighbor = current.position + dir;
@@ -270,9 +283,6 @@ public class MovementSystem : MonoBehaviour
 
                 bool isDiagonal = (dir.x != 0 && dir.y != 0);
 
-                // ─── 대각선 벽 끼기 방지 ───
-                // 대각선 이동 시 양쪽 직교 타일이 모두 walkable이어야 허용
-                // 이를 통해 벽 모서리를 대각선으로 빠져나가는 것을 방지
                 if (isDiagonal)
                 {
                     bool sideAWalkable = dungeonManager.IsWalkable(
@@ -300,14 +310,6 @@ public class MovementSystem : MonoBehaviour
         return null;
     }
 
-    /// <summary>
-    /// Chebyshev Distance 휴리스틱 (8방향 이동에 최적).
-    /// 직선 10, 대각선 14 비용 체계에 맞춘 공식:
-    /// h = COST_STRAIGHT * max(dx, dy) + (COST_DIAGONAL - COST_STRAIGHT) * min(dx, dy)
-    /// 
-    /// 이유: max(dx,dy) 칸만큼 이동해야 하는데, 그 중 min(dx,dy) 칸은
-    /// 대각선으로 갈 수 있어서 비용 차이(14-10=4)를 더해준다.
-    /// </summary>
     private int ChebyshevHeuristic(Vector2Int a, Vector2Int b)
     {
         int dx = Mathf.Abs(a.x - b.x);
@@ -326,8 +328,6 @@ public class MovementSystem : MonoBehaviour
         path.Reverse();
         return path;
     }
-
-    // ─── A* 내부 구조체 ───
 
     private struct AStarNode
     {
