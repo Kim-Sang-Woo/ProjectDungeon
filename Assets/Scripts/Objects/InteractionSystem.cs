@@ -130,14 +130,14 @@ public class InteractionSystem : MonoBehaviour
                                 !Inventory.Instance.Slots.Exists(
                                     s => s.item.itemId == item.itemId &&
                                          s.quantity < item.maxStack);
-            if (needsNewSlot && Inventory.Instance.Slots.Count >= Inventory.Instance.maxItemCount)
+            if (needsNewSlot && Inventory.Instance.Slots.Count >= Inventory.Instance.MaxItemCount)
             {
                 FloatingTextUI.Instance?.ShowNoSpace();
                 return; // 보물상자 소모 없이 취소
             }
 
             // 무게 초과 사전 체크
-            if (Inventory.Instance.CurrentWeight + item.weight * qty > Inventory.Instance.maxWeight)
+            if (Inventory.Instance.CurrentWeight + item.weight * qty > Inventory.Instance.MaxWeight)
             {
                 FloatingTextUI.Instance?.ShowTooHeavy();
                 return; // 보물상자 소모 없이 취소

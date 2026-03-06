@@ -32,10 +32,22 @@ public enum DungeonEventType
 }
 
 /// <summary>
-/// 던전 오브젝트 타입.
-/// DungeonObjectData ScriptableObject에서 타입을 지정하여
-/// 인터렉션 방식 및 표시 텍스트를 결정한다.
+/// 캐릭터 스탯 타입.
+/// CharacterStats에서 스탯을 식별하는 키로 사용된다.
 /// </summary>
+public enum StatType
+{
+    MaxHP,        // 최대 체력
+    HPGen,        // 턴당 체력 회복
+    BaseMana,     // 최대 지구력 (턴 시작 시 획득)
+    MaxHand,      // 행동력 (턴당 받는 카드 수)
+    BaseShield,   // 기본 방어력 (전투 시작 시 1회)
+    DamagePer,    // 피해량 증가 (%)
+    DamageConst,  // 피해량 증가 (+ 상수)
+    BaseDodge,    // 기본 회피 (전투 시작 시 1회)
+}
+
+
 public enum DungeonObjectType
 {
     TREASURE_CHEST, // 보물 상자 — 열기

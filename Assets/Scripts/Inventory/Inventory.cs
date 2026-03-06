@@ -37,9 +37,23 @@ public class Inventory : MonoBehaviour
 {
     public static Inventory Instance { get; private set; }
 
-    [Header("수량/무게 제한")]
-    public int   maxItemCount = 100;
-    public float maxWeight    = 100f;
+    [Header("스탯 연동")]
+    [Tooltip("CharacterStats에서 수량/무게 제한을 가져옴. 없으면 아래 기본값 사용")]
+    public CharacterStats characterStats;
+
+    [Header("수량/무게 제한 (CharacterStats 미연결 시 사용)")]
+    public int   maxItemCount = 30;
+    public float maxWeight    = 30f;
+
+    /// <summary>실제 적용되는 최대 슬롯 수</summary>
+    public int MaxItemCount => characterStats != null
+        ? characterStats.maxItemSlot
+        : maxItemCount;
+
+    /// <summary>실제 적용되는 최대 무게</summary>
+    public float MaxWeight => characterStats != null
+        ? characterStats.maxCarryWeight
+        : maxWeight;
 
     [Header("무게 감속 설정")]
     [Tooltip("이 비율 이상 무게가 차면 이동속도 감소 (0.0~1.0)")]
@@ -61,7 +75,7 @@ public class Inventory : MonoBehaviour
     }
 
     /// <summary>현재 무게가 감속 기준을 초과하는지 여부</summary>
-    public bool IsOverweightSlow => CurrentWeight >= maxWeight * weightSlowThreshold;
+    public bool IsOverweightSlow => CurrentWeight >= MaxWeight * weightSlowThreshold;
 
     public event Action OnInventoryChanged;
 
@@ -86,16 +100,16 @@ public class Inventory : MonoBehaviour
         bool needsNewSlot = !item.isStackable ||
                             !Slots.Exists(s => s.item.itemId == item.itemId &&
                                                s.quantity < item.maxStack);
-        if (needsNewSlot && Slots.Count >= maxItemCount)
+        if (needsNewSlot && Slots.Count >= MaxItemCount)
         {
-            Debug.Log($"[Inventory] 슬롯 초과! 현재:{Slots.Count} 최대:{maxItemCount}");
+            Debug.Log($"[Inventory] 슬롯 초과! 현재:{Slots.Count} 최대:{MaxItemCount}");
             return AddItemResult.FailSlotFull;
         }
 
         // 무게 제한 체크
-        if (CurrentWeight + item.weight * quantity > maxWeight)
+        if (CurrentWeight + item.weight * quantity > MaxWeight)
         {
-            Debug.Log($"[Inventory] 무게 초과! 현재:{CurrentWeight:F1} 추가:{item.weight * quantity:F1} 최대:{maxWeight}");
+            Debug.Log($"[Inventory] 무게 초과! 현재:{CurrentWeight:F1} 추가:{item.weight * quantity:F1} 최대:{MaxWeight}");
             return AddItemResult.FailTooHeavy;
         }
 

@@ -18,6 +18,7 @@ using UnityEngine.EventSystems;
 public class InventoryUI : MonoBehaviour
 {
     [Header("UI 요소")]
+    [Tooltip("단일 모노스페이스 텍스트 (Courier New 폰트 적용)")]
     public Text         statsText;
     public Transform    itemListContainer;
     public Text         itemEntryPrefab;
@@ -45,16 +46,34 @@ public class InventoryUI : MonoBehaviour
         if (panelImage != null) panelImage.raycastTarget = false;
     }
 
+    [Header("연동")]
+    [Tooltip("CharacterStats를 직접 연결 (자동 탐색 실패 시 사용)")]
+    public CharacterStats characterStats;
+
+    private CharacterStats cachedStats;
+
     private void Start()
     {
         if (Inventory.Instance != null)
             Inventory.Instance.OnInventoryChanged += RefreshIfVisible;
+
+        // Inspector 직접 연결 → Instance → FindObjectOfType 순으로 탐색
+        cachedStats = characterStats
+                      ?? CharacterStats.Instance
+                      ?? FindObjectOfType<CharacterStats>();
+
+        if (cachedStats != null)
+            cachedStats.OnStatsChanged += RefreshIfVisible;
+        else
+            Debug.LogWarning("[InventoryUI] CharacterStats를 찾을 수 없습니다. Inspector에서 직접 연결해주세요.");
     }
 
     private void OnDestroy()
     {
         if (Inventory.Instance != null)
             Inventory.Instance.OnInventoryChanged -= RefreshIfVisible;
+        if (cachedStats != null)
+            cachedStats.OnStatsChanged -= RefreshIfVisible;
     }
 
     private void Update()
@@ -73,6 +92,14 @@ public class InventoryUI : MonoBehaviour
 
     public void Show()
     {
+        // CharacterStats 재탐색 (Start 시점에 못 찾은 경우 대비)
+        if (cachedStats == null)
+        {
+            cachedStats = CharacterStats.Instance ?? FindObjectOfType<CharacterStats>();
+            if (cachedStats != null)
+                cachedStats.OnStatsChanged += RefreshIfVisible;
+        }
+
         isVisible = true;
         Refresh();
         ShowImmediate();
@@ -100,10 +127,43 @@ public class InventoryUI : MonoBehaviour
 
     private void RefreshStats()
     {
-        if (statsText == null || Inventory.Instance == null) return;
+        if (statsText == null) return;
+
+        var inv = Inventory.Instance;
+        var s   = cachedStats;
+
+        string itemCount = inv != null ? $"{inv.CurrentItemCount} / {inv.MaxItemCount}"                   : "-";
+        string weight    = inv != null ? $"{inv.CurrentWeight:F1} / {inv.MaxWeight:F1} kg"                : "-";
+        string hp        = s   != null ? $"{s.currentHP:F0} / {s.maxHP.FinalValue:F0}"                    : "-";
+        string hpGen     = s   != null ? $"{s.hpGen.FinalValue:F0}"                                       : "-";
+        string mana      = s   != null ? $"{s.baseMana.FinalValue:F0}"                                    : "-";
+        string hand      = s   != null ? $"{s.maxHand.FinalValue:F0}"                                     : "-";
+        string shield    = s   != null ? $"{s.baseShield.FinalValue:F0}"                                  : "-";
+        string damage    = s   != null ? $"{s.damageConst.FinalValue:F0} (+{s.damagePer.FinalValue:F0}%)" : "-";
+        string dodge     = s   != null ? $"{s.baseDodge.FinalValue:F0}"                                   : "-";
+
         statsText.text =
-            $"아이템  {Inventory.Instance.CurrentItemCount} / {Inventory.Instance.maxItemCount}\n" +
-            $"무게    {Inventory.Instance.CurrentWeight:F1} / {Inventory.Instance.maxWeight:F1} kg";
+            Pad("아이템", 9) + itemCount + "\n" +
+            Pad("무게",   9) + weight    + "\n" +
+            "─────────────────────\n"           +
+            Pad("체력",   9) + hp        + "\n" +
+            Pad("회복력", 9) + hpGen     + "\n" +
+            Pad("지구력", 9) + mana      + "\n" +
+            Pad("행동력", 9) + hand      + "\n" +
+            Pad("방어력", 9) + shield    + "\n" +
+            Pad("피해량", 9) + damage    + "\n" +
+            Pad("회피",   9) + dodge     + "\n" +
+            "─────────────────────";
+    }
+
+    /// <summary>모노스페이스 정렬 — 한글 1자=2칸, 영문=1칸</summary>
+    private string Pad(string label, int totalWidth)
+    {
+        int len = 0;
+        foreach (char c in label)
+            len += c > 127 ? 2 : 1;
+        int spaces = Mathf.Max(0, totalWidth - len);
+        return label + new string(' ', spaces);
     }
 
     private void RefreshItemList()
