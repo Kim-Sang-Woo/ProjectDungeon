@@ -1,14 +1,15 @@
 // ============================================================
-// InventoryUI.cs — 인벤토리 패널 UI
+// InventoryUI.cs — 인벤토리 패널 UI v4.2
 // 위치: Assets/Scripts/UI/InventoryUI.cs
 // ============================================================
-// [v1.1 수정]
-//   아이템 클릭 → ItemDetailUI 미호출 문제 수정
-//   - 원인: Text의 raycastTarget이 꺼져 있거나
-//     InventoryPanel Image가 클릭을 가로채는 경우
-//   - 해결: 코드에서 raycastTarget을 강제로 true 설정
-//     InventoryPanel의 Image.raycastTarget을 false로 설정하여
-//     패널 배경이 클릭을 가로채지 않도록 처리
+// [v4.2 변경사항] 큰 프리셋 적용
+//   panelWidth      380 → 420
+//   slotSize         72 → 80
+//   slotSpacing       5 → 6
+//   headerHeight     44 → 48
+//   bagHeaderHeight  32 → 34
+//   paddingH/V       18 → 20
+//   MAX_SLOTS     36(4×9) → 40(4×10)
 // ============================================================
 using System.Collections.Generic;
 using UnityEngine;
@@ -17,89 +18,87 @@ using UnityEngine.EventSystems;
 
 public class InventoryUI : MonoBehaviour
 {
-    [Header("UI 요소")]
-    [Tooltip("단일 모노스페이스 텍스트 (Courier New 폰트 적용)")]
-    public Text         statsText;
-    public Transform    itemListContainer;
-    public Text         itemEntryPrefab;
-    public ItemDetailUI itemDetailUI;
+    public static InventoryUI Instance { get; private set; }
 
     [Header("표시 제어")]
     public CanvasGroup canvasGroup;
 
-    [Header("아이템 텍스트 색상")]
-    public Color itemNormalColor = Color.white;
-    public Color itemHoverColor  = new Color(0.29f, 0.62f, 1.00f);
+    [Header("레이아웃 대상 오브젝트")]
+    public RectTransform header;
+    public RectTransform topSection;
+    public RectTransform itemListContainer;
 
-    [Header("아이템 높이")]
-    public float itemLineHeight = 30f;
+    [Header("Header 요소")]
+    public Text titleText;
+    public Text hintKeyText;
 
-    private List<GameObject> spawnedEntries = new List<GameObject>();
-    private bool isVisible = false;
+    [Header("ItemList 요소")]
+    public Text       bagInfoText;
+    public Transform  itemGrid;
+    public GameObject itemSlotPrefab;
 
-    private void Awake()
-    {
-        HideImmediate();
+    [Header("레이아웃 수치")]
+    public float panelWidth      = 420f;
+    public float headerHeight    = 48f;
+    public float bagHeaderHeight = 34f;
+    public float paddingH        = 20f;
+    public float paddingV        = 20f;
+    public float slotSize        = 80f;
+    public float slotSpacing     = 6f;
 
-        // ── 수정: InventoryPanel 자체 Image가 클릭을 가로채지 않도록 ──
-        Image panelImage = GetComponent<Image>();
-        if (panelImage != null) panelImage.raycastTarget = false;
-    }
+    [Header("슬롯 색상")]
+    public Color colorEmpty  = new Color(0.055f, 0.047f, 0.035f, 1f);
+    public Color colorFilled = new Color(0.094f, 0.078f, 0.063f, 1f);
+    public Color colorHover  = new Color(0.157f, 0.125f, 0.063f, 1f);
+    public Color colorLocked = new Color(0.035f, 0.031f, 0.027f, 1f);
 
     [Header("연동")]
-    [Tooltip("CharacterStats를 직접 연결 (자동 탐색 실패 시 사용)")]
-    public CharacterStats characterStats;
+    public EquipmentUI   equipmentUI;
+    public ItemTooltipUI tooltipUI;
 
-    private CharacterStats cachedStats;
+    private const int GRID_COLUMNS = 4;
+    private const int MAX_SLOTS    = 40; // 4×10
+
+    private List<GameObject> spawnedSlots = new List<GameObject>();
+    private bool             isVisible    = false;
+
+    // ────────────────────────────────────────────────────────
+    private void Awake()
+    {
+        if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+        Instance = this;
+        HideImmediate();
+    }
 
     private void Start()
     {
-        if (Inventory.Instance != null)
-            Inventory.Instance.OnInventoryChanged += RefreshIfVisible;
+        if (Inventory.Instance        != null)
+            Inventory.Instance.OnInventoryChanged    += RefreshIfVisible;
+        if (EquipmentManager.Instance != null)
+            EquipmentManager.Instance.OnEquipChanged += RefreshIfVisible;
 
-        // Inspector 직접 연결 → Instance → FindObjectOfType 순으로 탐색
-        cachedStats = characterStats
-                      ?? CharacterStats.Instance
-                      ?? FindObjectOfType<CharacterStats>();
-
-        if (cachedStats != null)
-            cachedStats.OnStatsChanged += RefreshIfVisible;
-        else
-            Debug.LogWarning("[InventoryUI] CharacterStats를 찾을 수 없습니다. Inspector에서 직접 연결해주세요.");
+        ApplyPanelLayout();
+        ApplyGridLayout();
     }
 
     private void OnDestroy()
     {
-        if (Inventory.Instance != null)
-            Inventory.Instance.OnInventoryChanged -= RefreshIfVisible;
-        if (cachedStats != null)
-            cachedStats.OnStatsChanged -= RefreshIfVisible;
+        if (Inventory.Instance        != null)
+            Inventory.Instance.OnInventoryChanged    -= RefreshIfVisible;
+        if (EquipmentManager.Instance != null)
+            EquipmentManager.Instance.OnEquipChanged -= RefreshIfVisible;
     }
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Tab))
-            Toggle();
+        if (Input.GetKeyDown(KeyCode.Tab)) Toggle();
     }
 
-    // ─── 표시/숨김 ───
-
-    public void Toggle()
-    {
-        if (isVisible) Hide();
-        else           Show();
-    }
+    // ────────────────────────────────────────────────────────
+    public void Toggle() { if (isVisible) Hide(); else Show(); }
 
     public void Show()
     {
-        // CharacterStats 재탐색 (Start 시점에 못 찾은 경우 대비)
-        if (cachedStats == null)
-        {
-            cachedStats = CharacterStats.Instance ?? FindObjectOfType<CharacterStats>();
-            if (cachedStats != null)
-                cachedStats.OnStatsChanged += RefreshIfVisible;
-        }
-
         isVisible = true;
         Refresh();
         ShowImmediate();
@@ -109,188 +108,299 @@ public class InventoryUI : MonoBehaviour
     {
         isVisible = false;
         HideImmediate();
-        if (itemDetailUI != null) itemDetailUI.Hide();
+        if (tooltipUI != null) tooltipUI.Hide();
     }
 
-    private void RefreshIfVisible()
+    // ────────────────────────────────────────────────────────
+    public void ApplyPanelLayout()
     {
-        if (isVisible) Refresh();
+        float equipSectionH = CalcEquipSectionHeight();
+        float itemGridH     = CalcItemGridHeight();
+        float itemSectionH  = paddingV + bagHeaderHeight + slotSpacing + itemGridH + paddingV;
+        float totalH        = headerHeight + equipSectionH + itemSectionH;
+
+        // InventoryPanel
+        RectTransform panelRT = GetComponent<RectTransform>();
+        if (panelRT != null)
+        {
+            panelRT.anchorMin        = new Vector2(0f, 1f);
+            panelRT.anchorMax        = new Vector2(0f, 1f);
+            panelRT.pivot            = new Vector2(0f, 1f);
+            panelRT.anchoredPosition = Vector2.zero;
+            panelRT.sizeDelta        = new Vector2(panelWidth, totalH);
+        }
+
+        float y = 0f;
+
+        // Header
+        if (header != null)
+        {
+            header.anchorMin = new Vector2(0f, 1f);
+            header.anchorMax = new Vector2(1f, 1f);
+            header.pivot     = new Vector2(0.5f, 1f);
+            header.offsetMin = new Vector2(0f, y - headerHeight);
+            header.offsetMax = new Vector2(0f, y);
+
+            if (titleText != null)
+            {
+                RectTransform rt = titleText.GetComponent<RectTransform>();
+                rt.anchorMin = new Vector2(0f,   0f);
+                rt.anchorMax = new Vector2(0.7f, 1f);
+                rt.pivot     = new Vector2(0f, 0.5f);
+                rt.offsetMin = new Vector2(paddingH, 0f);
+                rt.offsetMax = new Vector2(0f,       0f);
+            }
+            if (hintKeyText != null)
+            {
+                RectTransform rt = hintKeyText.GetComponent<RectTransform>();
+                rt.anchorMin = new Vector2(0.7f, 0f);
+                rt.anchorMax = new Vector2(1f,   1f);
+                rt.pivot     = new Vector2(1f, 0.5f);
+                rt.offsetMin = new Vector2(0f,        0f);
+                rt.offsetMax = new Vector2(-paddingH, 0f);
+            }
+        }
+        y -= headerHeight;
+
+        // TopSection
+        if (topSection != null)
+        {
+            topSection.anchorMin = new Vector2(0f, 1f);
+            topSection.anchorMax = new Vector2(1f, 1f);
+            topSection.pivot     = new Vector2(0.5f, 1f);
+            topSection.offsetMin = new Vector2(0f, y - equipSectionH);
+            topSection.offsetMax = new Vector2(0f, y);
+        }
+        y -= equipSectionH;
+
+        // ItemListContainer
+        if (itemListContainer != null)
+        {
+            itemListContainer.anchorMin = new Vector2(0f, 1f);
+            itemListContainer.anchorMax = new Vector2(1f, 1f);
+            itemListContainer.pivot     = new Vector2(0.5f, 1f);
+            itemListContainer.offsetMin = new Vector2(0f, y - itemSectionH);
+            itemListContainer.offsetMax = new Vector2(0f, y);
+
+            if (bagInfoText != null)
+            {
+                RectTransform rt = bagInfoText.GetComponent<RectTransform>();
+                rt.anchorMin = new Vector2(0f, 1f);
+                rt.anchorMax = new Vector2(1f, 1f);
+                rt.pivot     = new Vector2(0.5f, 1f);
+                rt.offsetMin = new Vector2(paddingH,  -paddingV - bagHeaderHeight);
+                rt.offsetMax = new Vector2(-paddingH, -paddingV);
+            }
+
+            if (itemGrid != null)
+            {
+                RectTransform rt = itemGrid.GetComponent<RectTransform>();
+                float gridW      = slotSize * GRID_COLUMNS + slotSpacing * (GRID_COLUMNS - 1);
+                float gridY      = -(paddingV + bagHeaderHeight + slotSpacing);
+                rt.anchorMin        = new Vector2(0.5f, 1f);
+                rt.anchorMax        = new Vector2(0.5f, 1f);
+                rt.pivot            = new Vector2(0.5f, 1f);
+                rt.anchoredPosition = new Vector2(0f, gridY);
+                rt.sizeDelta        = new Vector2(gridW, itemGridH);
+            }
+        }
+
+        Debug.Log($"[InventoryUI] 레이아웃 확정 — 패널:{panelWidth}×{totalH} " +
+                  $"(헤더:{headerHeight} 장비섹션:{equipSectionH} 아이템섹션:{itemSectionH})");
     }
 
-    // ─── 목록 갱신 ───
+    private float CalcEquipSectionHeight()
+    {
+        float gridH = slotSize * 3f + slotSpacing * 2f;
+        return paddingV + 24f + 10f + gridH + paddingV;
+    }
+
+    private float CalcItemGridHeight()
+    {
+        int rows = Mathf.CeilToInt((float)MAX_SLOTS / GRID_COLUMNS); // 10
+        return slotSize * rows + slotSpacing * (rows - 1);
+    }
+
+    private void ApplyGridLayout()
+    {
+        if (itemGrid == null) return;
+        GridLayoutGroup g = itemGrid.GetComponent<GridLayoutGroup>();
+        if (g == null) g  = itemGrid.gameObject.AddComponent<GridLayoutGroup>();
+
+        g.cellSize        = new Vector2(slotSize, slotSize);
+        g.spacing         = new Vector2(slotSpacing, slotSpacing);
+        g.startCorner     = GridLayoutGroup.Corner.UpperLeft;
+        g.startAxis       = GridLayoutGroup.Axis.Horizontal;
+        g.childAlignment  = TextAnchor.UpperLeft;
+        g.constraint      = GridLayoutGroup.Constraint.FixedColumnCount;
+        g.constraintCount = GRID_COLUMNS;
+    }
+
+    // ────────────────────────────────────────────────────────
+    private void RefreshIfVisible() { if (isVisible) Refresh(); }
 
     private void Refresh()
     {
-        RefreshStats();
-        RefreshItemList();
+        RefreshBagHeader();
+        RefreshGrid();
+        if (equipmentUI != null) equipmentUI.Refresh();
     }
 
-    private void RefreshStats()
+    private void RefreshBagHeader()
     {
-        if (statsText == null) return;
-
+        if (bagInfoText == null) return;
         var inv = Inventory.Instance;
-        var s   = cachedStats;
-
-        string itemCount = inv != null ? $"{inv.CurrentItemCount} / {inv.MaxItemCount}"                   : "-";
-        string weight    = inv != null ? $"{inv.CurrentWeight:F1} / {inv.MaxWeight:F1} kg"                : "-";
-        string hp        = s   != null ? $"{s.currentHP:F0} / {s.maxHP.FinalValue:F0}"                    : "-";
-        string hpGen     = s   != null ? $"{s.hpGen.FinalValue:F0}"                                       : "-";
-        string mana      = s   != null ? $"{s.baseMana.FinalValue:F0}"                                    : "-";
-        string hand      = s   != null ? $"{s.maxHand.FinalValue:F0}"                                     : "-";
-        string shield    = s   != null ? $"{s.baseShield.FinalValue:F0}"                                  : "-";
-        string damage    = s   != null ? $"{s.damageConst.FinalValue:F0} (+{s.damagePer.FinalValue:F0}%)" : "-";
-        string dodge     = s   != null ? $"{s.baseDodge.FinalValue:F0}"                                   : "-";
-
-        statsText.text =
-            Pad("아이템", 9) + itemCount + "\n" +
-            Pad("무게",   9) + weight    + "\n" +
-            "─────────────────────\n"           +
-            Pad("체력",   9) + hp        + "\n" +
-            Pad("회복력", 9) + hpGen     + "\n" +
-            Pad("지구력", 9) + mana      + "\n" +
-            Pad("행동력", 9) + hand      + "\n" +
-            Pad("방어력", 9) + shield    + "\n" +
-            Pad("피해량", 9) + damage    + "\n" +
-            Pad("회피",   9) + dodge     + "\n" +
-            "─────────────────────";
+        if (inv == null) { bagInfoText.text = ""; return; }
+        bagInfoText.text =
+            $"슬롯 {inv.CurrentItemCount} / {inv.MaxItemCount}    " +
+            $"무게 {inv.CurrentWeight:F1} / {inv.MaxWeight:F1} kg";
     }
 
-    /// <summary>모노스페이스 정렬 — 한글 1자=2칸, 영문=1칸</summary>
-    private string Pad(string label, int totalWidth)
+    private void RefreshGrid()
     {
-        int len = 0;
-        foreach (char c in label)
-            len += c > 127 ? 2 : 1;
-        int spaces = Mathf.Max(0, totalWidth - len);
-        return label + new string(' ', spaces);
-    }
+        foreach (var go in spawnedSlots)
+            if (go != null) Destroy(go);
+        spawnedSlots.Clear();
 
-    private void RefreshItemList()
-    {
-        ClearEntries();
-        if (Inventory.Instance == null || itemListContainer == null || itemEntryPrefab == null)
+        if (itemGrid == null || itemSlotPrefab == null) return;
+
+        var inv       = Inventory.Instance;
+        var slots     = inv?.Slots;
+        int openSlots = inv != null ? Mathf.Min(inv.MaxItemCount, MAX_SLOTS) : 0;
+
+        for (int i = 0; i < MAX_SLOTS; i++)
         {
-            Debug.LogWarning($"[InventoryUI] RefreshItemList 실패 — " +
-                $"Inventory:{Inventory.Instance != null} " +
-                $"Container:{itemListContainer != null} " +
-                $"Prefab:{itemEntryPrefab != null}");
-            return;
-        }
-
-        var slots = Inventory.Instance.Slots;
-        Debug.Log($"[InventoryUI] 목록 갱신 — 슬롯 수:{slots.Count}");
-
-        itemEntryPrefab.gameObject.SetActive(false);
-
-        if (slots.Count == 0)
-        {
-            GameObject emptyGo = Instantiate(itemEntryPrefab.gameObject, itemListContainer);
-            Text emptyText = emptyGo.GetComponent<Text>();
-            if (emptyText != null)
-            {
-                emptyText.text           = "아이템이 없습니다.";
-                emptyText.color          = new Color(0.6f, 0.6f, 0.6f);
-                emptyText.raycastTarget  = false;
-            }
-            SetLayoutElement(emptyGo);
-            emptyGo.SetActive(true);
-            spawnedEntries.Add(emptyGo);
-            return;
-        }
-
-        for (int i = 0; i < slots.Count; i++)
-        {
-            InventorySlot slot = slots[i];
-            GameObject go = Instantiate(itemEntryPrefab.gameObject, itemListContainer);
-            Text t = go.GetComponent<Text>();
-
-            if (t != null)
-            {
-                t.text  = slot.item.isStackable && slot.quantity > 1
-                    ? $"· {slot.item.itemName}({slot.quantity})"
-                    : $"· {slot.item.itemName}";
-                t.color          = itemNormalColor;
-                t.raycastTarget  = true; // ── 수정: 클릭 감지를 위해 강제 활성화
-            }
-
-            SetLayoutElement(go);
+            bool          isOpen = i < openSlots;
+            InventorySlot slot   = (isOpen && slots != null && i < slots.Count) ? slots[i] : null;
+            GameObject    go     = Instantiate(itemSlotPrefab, itemGrid);
             go.SetActive(true);
-
-            int capturedIndex = i;
-            SetupEntryEvents(go, t, slot, capturedIndex);
-            spawnedEntries.Add(go);
+            SetupSlot(go, slot, i, isOpen);
+            spawnedSlots.Add(go);
         }
     }
 
-    private void SetupEntryEvents(GameObject go, Text t, InventorySlot slot, int index)
+    // ────────────────────────────────────────────────────────
+    private void SetupSlot(GameObject go, InventorySlot slot, int index, bool isOpen)
     {
-        EventTrigger trigger = go.GetComponent<EventTrigger>();
-        if (trigger == null) trigger = go.AddComponent<EventTrigger>();
+        Image bg = go.GetComponent<Image>();
+        if (bg == null) bg = go.AddComponent<Image>();
+
+        Image iconImg  = FindChildImage(go, "Icon");
+        // 이름 매칭 우선, 실패 시 인덱스 순서로 fallback
+        Text  qtyText  = FindChildText(go, "Quantity") ?? FindChildTextByIndex(go, 0);
+        Text  nameText = FindChildText(go, "Name")     ?? FindChildTextByIndex(go, 1);
+
+        if (!isOpen)
+        {
+            bg.color = colorLocked; bg.raycastTarget = false;
+            SetActive(iconImg, false); SetActive(qtyText, false); SetActive(nameText, false);
+            return;
+        }
+
+        bg.raycastTarget = true;
+
+        if (slot == null)
+        {
+            bg.color = colorEmpty;
+            SetActive(iconImg, false); SetActive(qtyText, false); SetActive(nameText, false);
+            return;
+        }
+
+        bg.color = colorFilled;
+
+        if (iconImg != null)
+        {
+            iconImg.gameObject.SetActive(true);
+            if (slot.item.icon != null) { iconImg.sprite = slot.item.icon; iconImg.color = Color.white; }
+            else                        { iconImg.sprite = null; iconImg.color = new Color(0.5f, 0.5f, 0.5f); }
+        }
+        if (qtyText != null)
+        {
+            bool show = slot.item.isStackable && slot.quantity > 1;
+            Debug.Log($"[InvUI] {slot.item.itemName} isStackable={slot.item.isStackable} qty={slot.quantity} show={show} qtyObj={qtyText.gameObject.name}");
+            qtyText.gameObject.SetActive(show);
+            if (show) qtyText.text = slot.quantity.ToString();
+        }
+        if (nameText != null)
+        {
+            bool noIcon = slot.item.icon == null;
+            nameText.gameObject.SetActive(noIcon);
+            if (noIcon) { nameText.text = slot.item.itemName; nameText.fontSize = Mathf.RoundToInt(slotSize / 5f); }
+        }
+
+        int ci = index; InventorySlot cs = slot;
+        RectTransform rt = go.GetComponent<RectTransform>();
+
+        EventTrigger trigger = go.GetComponent<EventTrigger>() ?? go.AddComponent<EventTrigger>();
         trigger.triggers.Clear();
 
-        var click = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
-        click.callback.AddListener(_ =>
-        {
-            if (itemDetailUI != null)
-                itemDetailUI.Show(slot, index, OnItemAction);
-        });
-        trigger.triggers.Add(click);
-
         var enter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
-        enter.callback.AddListener(_ => { if (t) t.color = itemHoverColor; });
+        enter.callback.AddListener(_ => { bg.color = colorHover; tooltipUI?.ShowForSlot(cs, rt); });
         trigger.triggers.Add(enter);
 
         var exitE = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
-        exitE.callback.AddListener(_ => { if (t) t.color = itemNormalColor; });
+        exitE.callback.AddListener(_ => { bg.color = colorFilled; tooltipUI?.Hide(); });
         trigger.triggers.Add(exitE);
-    }
 
-    // ─── 아이템 액션 처리 ───
-
-    private void OnItemAction(string actionId, int slotIndex)
-    {
-        switch (actionId)
+        var click = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
+        click.callback.AddListener(evt =>
         {
-            case "delete":
-                Inventory.Instance?.RemoveAt(slotIndex);
-                break;
-            default:
-                Debug.LogWarning($"[InventoryUI] 처리되지 않은 actionId: {actionId}");
-                break;
-        }
+            var pe = evt as PointerEventData;
+            if (pe != null && pe.button == PointerEventData.InputButton.Right)
+                OnRightClick(cs, ci);
+        });
+        trigger.triggers.Add(click);
     }
 
-    // ─── 유틸 ───
-
-    private void SetLayoutElement(GameObject go)
+    private void OnRightClick(InventorySlot slot, int index)
     {
-        LayoutElement le = go.GetComponent<LayoutElement>();
-        if (le == null) le = go.AddComponent<LayoutElement>();
-        le.preferredHeight = itemLineHeight;
-        le.minHeight       = itemLineHeight;
+        if (slot == null) return;
+        EquipData equip = slot.item as EquipData;
+        // 장착 가능한 아이템만 처리, 그 외는 무응답
+        if (equip == null) return;
+        tooltipUI?.Hide();
+        Inventory.Instance?.RemoveAt(index);
+        EquipmentManager.Instance?.Equip(equip);
     }
 
-    private void ClearEntries()
+    // ────────────────────────────────────────────────────────
+    private Image FindChildImage(GameObject go, string n)
     {
-        foreach (var go in spawnedEntries)
-            if (go != null) Destroy(go);
-        spawnedEntries.Clear();
+        Transform t = go.transform.Find(n);
+        if (t != null) return t.GetComponent<Image>();
+        foreach (Image c in go.GetComponentsInChildren<Image>(true))
+            if (c.gameObject.name == n) return c;
+        return null;
     }
+
+    private Text FindChildText(GameObject go, string n)
+    {
+        Transform t = go.transform.Find(n);
+        if (t != null) return t.GetComponent<Text>();
+        foreach (Text c in go.GetComponentsInChildren<Text>(true))
+            if (c.gameObject.name == n) return c;
+        return null;
+    }
+
+    /// <summary>이름 매칭 실패 시 인덱스 순서로 Text 자식 반환</summary>
+    private Text FindChildTextByIndex(GameObject go, int index)
+    {
+        Text[] texts = go.GetComponentsInChildren<Text>(true);
+        return index < texts.Length ? texts[index] : null;
+    }
+
+    private void SetActive(Component c, bool active)
+    { if (c != null) c.gameObject.SetActive(active); }
 
     private void ShowImmediate()
     {
         if (canvasGroup == null) return;
-        canvasGroup.alpha          = 1f;
-        canvasGroup.interactable   = true;
-        canvasGroup.blocksRaycasts = true;
+        canvasGroup.alpha = 1f; canvasGroup.interactable = true; canvasGroup.blocksRaycasts = true;
     }
 
     private void HideImmediate()
     {
         if (canvasGroup == null) return;
-        canvasGroup.alpha          = 0f;
-        canvasGroup.interactable   = false;
-        canvasGroup.blocksRaycasts = false;
+        canvasGroup.alpha = 0f; canvasGroup.interactable = false; canvasGroup.blocksRaycasts = false;
     }
 }

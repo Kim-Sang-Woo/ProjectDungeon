@@ -2,28 +2,25 @@
 // ItemDetailUI.cs — 아이템 상세 UI
 // 위치: Assets/Scripts/UI/ItemDetailUI.cs
 // ============================================================
-// [개요]
-//   인벤토리에서 아이템 클릭 시 표시되는 상세 UI.
-//   이름/설명 표시 + 버리기 액션 제공.
-//   InteractionUI와 동일한 CanvasGroup 방식 사용.
-//
 // [Canvas 계층]
 //   Canvas
 //   └── ItemDetailPanel       ← ItemDetailUI.cs 부착 + CanvasGroup
 //         ├── ItemNameText
+//         ├── ItemEquipStatsText  ← 장비 능력치 (장비 아이템만 표시)
 //         ├── ItemDescText
 //         ├── ItemPriceText
 //         ├── ItemWeightText
 //         └── ActionsContainer (Vertical Layout Group)
 //
 // [Inspector 연결]
-//   itemNameText   → ItemNameText
-//   itemDescText   → ItemDescText
-//   itemPriceText  → ItemPriceText
-//   itemWeightText → ItemWeightText
-//   actionsContainer→ ActionsContainer
-//   actionLinkPrefab→ ActionLinkText (복제 원본)
-//   canvasGroup    → CanvasGroup
+//   itemNameText        → ItemNameText
+//   itemEquipStatsText  → ItemEquipStatsText
+//   itemDescText        → ItemDescText
+//   itemPriceText       → ItemPriceText
+//   itemWeightText      → ItemWeightText
+//   actionsContainer    → ActionsContainer
+//   actionLinkPrefab    → ActionLinkText (복제 원본)
+//   canvasGroup         → CanvasGroup
 // ============================================================
 using System;
 using System.Collections.Generic;
@@ -35,6 +32,7 @@ public class ItemDetailUI : MonoBehaviour
 {
     [Header("UI 요소")]
     public Text      itemNameText;
+    public Text      itemEquipStatsText;  // 장비 능력치 (장비 아이템만)
     public Text      itemDescText;
     public Text      itemPriceText;
     public Text      itemWeightText;
@@ -53,29 +51,35 @@ public class ItemDetailUI : MonoBehaviour
 
     private List<GameObject> spawnedLinks = new List<GameObject>();
 
-    private void Awake()
-    {
-        HideImmediate();
-    }
+    private void Awake() => HideImmediate();
 
     // ─── 공개 API ───
 
-    /// <summary>
-    /// 아이템 상세 UI를 표시한다.
-    /// </summary>
-    /// <param name="slot">표시할 슬롯</param>
-    /// <param name="slotIndex">버리기 처리용 슬롯 인덱스</param>
-    /// <param name="onAction">actionId 콜백</param>
+    /// <summary>인벤토리 일반 아이템 표시</summary>
     public void Show(InventorySlot slot, int slotIndex, Action<string, int> onAction)
     {
         if (slot == null) return;
 
-        if (itemNameText   != null) itemNameText.text   = slot.item.itemName;
-        if (itemDescText   != null) itemDescText.text   = slot.item.description;
-        if (itemPriceText  != null) itemPriceText.text  = $"가격: {slot.item.price}G";
-        if (itemWeightText != null) itemWeightText.text = $"무게: {slot.item.weight:F1}kg";
+        SetBasicInfo(slot.item.itemName, slot.item.description,
+                     slot.item.price, slot.item.weight);
 
-        BuildActionLinks(slotIndex, onAction);
+        // 장비 아이템인지 확인
+        EquipData equip = slot.item as EquipData;
+        SetEquipStats(equip);
+
+        BuildInventoryActions(slotIndex, equip, onAction);
+        ShowImmediate();
+    }
+
+    /// <summary>장착된 장비 슬롯 클릭 시 표시</summary>
+    public void ShowEquipped(EquipData equip, EquipType slot)
+    {
+        if (equip == null) return;
+
+        SetBasicInfo(equip.itemName, equip.description, equip.price, equip.weight);
+        SetEquipStats(equip);
+
+        BuildEquippedActions(slot);
         ShowImmediate();
     }
 
@@ -85,20 +89,96 @@ public class ItemDetailUI : MonoBehaviour
         ClearLinks();
     }
 
-    // ─── 액션 링크 생성 ───
+    // ─── 내부 UI 구성 ───
 
-    private void BuildActionLinks(int slotIndex, Action<string, int> onAction)
+    private void SetBasicInfo(string name, string desc, int price, float weight)
+    {
+        if (itemNameText   != null) itemNameText.text   = name;
+        if (itemDescText   != null) itemDescText.text   = desc;
+        if (itemPriceText  != null) itemPriceText.text  = $"가격: {price}G";
+        if (itemWeightText != null) itemWeightText.text = $"무게: {weight:F1}kg";
+    }
+
+    private void SetEquipStats(EquipData equip)
+    {
+        if (itemEquipStatsText == null) return;
+
+        if (equip == null || !equip.HasStats)
+        {
+            itemEquipStatsText.gameObject.SetActive(false);
+            return;
+        }
+
+        itemEquipStatsText.gameObject.SetActive(true);
+
+        var sb = new System.Text.StringBuilder();
+        void Add(string label, float val)
+        {
+            if (val == 0) return;
+            sb.AppendLine($"{label}: {(val > 0 ? "+" : "")}{val}");
+        }
+        void AddInt(string label, int val)
+        {
+            if (val == 0) return;
+            sb.AppendLine($"{label}: {(val > 0 ? "+" : "")}{val}");
+        }
+
+        Add("체력",       equip.statMaxHP);
+        Add("회복력",     equip.statHPGen);
+        Add("지구력",     equip.statBaseMana);
+        Add("행동력",     equip.statMaxHand);
+        Add("방어력",     equip.statBaseShield);
+        Add("피해량%",    equip.statDamagePer);
+        Add("피해량+",    equip.statDamageConst);
+        Add("회피",       equip.statBaseDodge);
+        AddInt("슬롯+",   equip.statMaxItemSlot);
+        Add("무게한도+",  equip.statMaxCarryWeight);
+
+        itemEquipStatsText.text = sb.ToString().TrimEnd();
+    }
+
+    // ─── 액션 링크 ───
+
+    /// <summary>인벤토리 아이템 액션 — 장비면 '장착', 항상 '버리기'</summary>
+    private void BuildInventoryActions(int slotIndex, EquipData equip,
+                                       Action<string, int> onAction)
     {
         ClearLinks();
         if (actionsContainer == null || actionLinkPrefab == null) return;
-
         actionLinkPrefab.gameObject.SetActive(false);
 
-        // 버리기
+        if (equip != null)
+            SpawnLink("장착", "equip", slotIndex, onAction);
+
         SpawnLink("버리기", "delete", slotIndex, onAction);
     }
 
-    private void SpawnLink(string label, string actionId, int slotIndex, Action<string, int> onAction)
+    /// <summary>장착된 장비 액션 — '장착 해제'만 표시 (버리기 불가)</summary>
+    private void BuildEquippedActions(EquipType slot)
+    {
+        ClearLinks();
+        if (actionsContainer == null || actionLinkPrefab == null) return;
+        actionLinkPrefab.gameObject.SetActive(false);
+
+        EquipType capturedSlot = slot;
+        SpawnLinkDirect("장착 해제", () =>
+        {
+            EquipmentManager.Instance?.Unequip(capturedSlot);
+            Hide();
+        });
+    }
+
+    private void SpawnLink(string label, string actionId, int slotIndex,
+                           Action<string, int> onAction)
+    {
+        SpawnLinkDirect(label, () =>
+        {
+            onAction?.Invoke(actionId, slotIndex);
+            Hide();
+        });
+    }
+
+    private void SpawnLinkDirect(string label, Action onClick)
     {
         GameObject go = Instantiate(actionLinkPrefab.gameObject, actionsContainer);
         Text t = go.GetComponent<Text>();
@@ -121,11 +201,8 @@ public class ItemDetailUI : MonoBehaviour
         if (trigger == null) trigger = go.AddComponent<EventTrigger>();
         trigger.triggers.Clear();
 
-        string capturedId  = actionId;
-        int    capturedIdx = slotIndex;
-
         var click = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
-        click.callback.AddListener(_ => { onAction?.Invoke(capturedId, capturedIdx); Hide(); });
+        click.callback.AddListener(_ => onClick?.Invoke());
         trigger.triggers.Add(click);
 
         var enter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
@@ -149,16 +226,15 @@ public class ItemDetailUI : MonoBehaviour
     private void ShowImmediate()
     {
         if (canvasGroup == null) return;
-        canvasGroup.alpha          = 1f;
-        canvasGroup.interactable   = true;
+        canvasGroup.alpha = 1f; canvasGroup.interactable = true;
         canvasGroup.blocksRaycasts = true;
     }
 
     private void HideImmediate()
     {
         if (canvasGroup == null) return;
-        canvasGroup.alpha          = 0f;
-        canvasGroup.interactable   = false;
+        canvasGroup.alpha = 0f; canvasGroup.interactable = false;
         canvasGroup.blocksRaycasts = false;
     }
 }
+

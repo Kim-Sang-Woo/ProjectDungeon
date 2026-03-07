@@ -28,6 +28,9 @@ public class ItemData : ScriptableObject
     public string itemName;
 
     [Header("표시 정보")]
+    [Tooltip("인벤토리 슬롯 아이콘 (없으면 이름 텍스트로 대체)")]
+    public Sprite icon;
+
     [Tooltip("아이템 설명")]
     [TextArea(2, 4)]
     public string description;

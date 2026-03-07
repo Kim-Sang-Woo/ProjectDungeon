@@ -45,6 +45,19 @@ public class CharacterStats : MonoBehaviour
     [Tooltip("보유 가능한 최대 무게 (kg)")]
     public float maxCarryWeight = 30f;
 
+    [Header("스탯 캡 (어떠한 요인으로도 초과 불가)")]
+    [Tooltip("0 이하 = 제한 없음")]
+    public float capMaxHP        = 0;
+    public float capHPGen        = 0;
+    public float capBaseMana     = 0;
+    public float capMaxHand      = 0;
+    public float capBaseShield   = 0;
+    public float capDamagePer    = 0;
+    public float capDamageConst  = 0;
+    public float capBaseDodge    = 0;
+    public int   capMaxItemSlot  = 0;
+    public float capMaxCarryWeight = 0;
+
     [Header("체력")]
     public StatEntry maxHP        = new StatEntry { baseValue = 100 };
     public StatEntry hpGen        = new StatEntry { baseValue = 0   };
@@ -73,6 +86,9 @@ public class CharacterStats : MonoBehaviour
 
     /// <summary>스탯 변경 시 발신 (UI 갱신용)</summary>
     public event Action OnStatsChanged;
+
+    /// <summary>외부에서 OnStatsChanged 발신용 (EquipmentManager 등)</summary>
+    public void NotifyStatsChanged() => OnStatsChanged?.Invoke();
 
     private void Awake()
     {
@@ -107,9 +123,10 @@ public class CharacterStats : MonoBehaviour
     /// <summary>장비 착용 시 보정치 추가</summary>
     public void AddModifier(StatType type, float value)
     {
-        GetEntry(type).modifier += value;
+        var entry = GetEntry(type);
+        entry.modifier += value;
+        entry.modifier  = ApplyCap(type, entry.modifier, entry.baseValue);
         OnStatsChanged?.Invoke();
-        Debug.Log($"[CharacterStats] {type} +{value} → {Get(type)}");
     }
 
     /// <summary>장비 해제 시 보정치 제거</summary>
@@ -117,7 +134,32 @@ public class CharacterStats : MonoBehaviour
     {
         GetEntry(type).modifier -= value;
         OnStatsChanged?.Invoke();
-        Debug.Log($"[CharacterStats] {type} -{value} → {Get(type)}");
+    }
+
+    /// <summary>스탯 캡 적용 — baseValue + modifier가 캡을 초과하지 않도록 modifier 보정</summary>
+    private float ApplyCap(StatType type, float modifier, float baseValue)
+    {
+        float cap = GetCap(type);
+        if (cap <= 0) return modifier; // 캡 없음
+        float total = baseValue + modifier;
+        if (total > cap) modifier = cap - baseValue;
+        return modifier;
+    }
+
+    private float GetCap(StatType type)
+    {
+        switch (type)
+        {
+            case StatType.MaxHP:       return capMaxHP;
+            case StatType.HPGen:       return capHPGen;
+            case StatType.BaseMana:    return capBaseMana;
+            case StatType.MaxHand:     return capMaxHand;
+            case StatType.BaseShield:  return capBaseShield;
+            case StatType.DamagePer:   return capDamagePer;
+            case StatType.DamageConst: return capDamageConst;
+            case StatType.BaseDodge:   return capBaseDodge;
+            default: return 0;
+        }
     }
 
     // ─── 현재값 조작 (전투용) ───

@@ -47,6 +47,19 @@ public enum StatType
     BaseDodge,    // 기본 회피 (전투 시작 시 1회)
 }
 
+/// <summary>장비 타입 — 슬롯 식별자</summary>
+public enum EquipType
+{
+    Weapon,    // 무기
+    Armor,     // 갑옷
+    Gloves,    // 장갑
+    Boots,     // 신발
+    Ring,      // 반지
+    Necklace,  // 목걸이
+    Amulet,    // 장신구
+    Bag,       // 가방 (MaxItemSlot / MaxCarryWeight 증가)
+}
+
 
 public enum DungeonObjectType
 {
