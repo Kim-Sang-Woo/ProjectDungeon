@@ -86,6 +86,23 @@ public class EquipmentManager : MonoBehaviour
     public void Unequip(EquipType slot)
     {
         if (!equipped.TryGetValue(slot, out var equip) || equip == null) return;
+
+        // 가방 해제 시 슬롯 감소 여부 체크
+        if (equip.equipType == EquipType.Bag && equip.statMaxItemSlot > 0)
+        {
+            int currentItems  = Inventory.Instance != null ? Inventory.Instance.CurrentItemCount : 0;
+            int currentMax    = Inventory.Instance != null ? Inventory.Instance.MaxItemCount : 0;
+            int afterMax      = currentMax - equip.statMaxItemSlot;
+
+            // 가방 자체도 인벤토리로 반환되므로 슬롯 1개 추가 필요
+            if (currentItems > afterMax - 1)
+            {
+                FloatingTextUI.Instance?.Show("가방을 해제할 수 없습니다.", FloatingTextUI.ColorFail);
+                Debug.Log($"[EquipmentManager] 가방 해제 불가 — 현재 아이템:{currentItems} 해제 후 슬롯:{afterMax}");
+                return;
+            }
+        }
+
         UnequipInternal(equip);
         equipped.Remove(slot);
 

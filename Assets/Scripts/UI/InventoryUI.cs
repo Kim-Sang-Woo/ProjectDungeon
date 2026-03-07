@@ -50,7 +50,7 @@ public class InventoryUI : MonoBehaviour
     public Color colorEmpty  = new Color(0.055f, 0.047f, 0.035f, 1f);
     public Color colorFilled = new Color(0.094f, 0.078f, 0.063f, 1f);
     public Color colorHover  = new Color(0.157f, 0.125f, 0.063f, 1f);
-    public Color colorLocked = new Color(0.035f, 0.031f, 0.027f, 1f);
+    public Color colorLocked   = new Color(0.035f, 0.031f, 0.027f, 1f);
 
     [Header("연동")]
     public EquipmentUI   equipmentUI;
@@ -273,8 +273,9 @@ public class InventoryUI : MonoBehaviour
             bool          isOpen = i < openSlots;
             InventorySlot slot   = (isOpen && slots != null && i < slots.Count) ? slots[i] : null;
             GameObject    go     = Instantiate(itemSlotPrefab, itemGrid);
-            go.SetActive(true);
-            SetupSlot(go, slot, i, isOpen);
+            // 잠긴 슬롯은 오브젝트 자체를 숨김
+            go.SetActive(isOpen);
+            if (isOpen) SetupSlot(go, slot, i, isOpen);
             spawnedSlots.Add(go);
         }
     }
@@ -289,13 +290,6 @@ public class InventoryUI : MonoBehaviour
         // 이름 매칭 우선, 실패 시 인덱스 순서로 fallback
         Text  qtyText  = FindChildText(go, "Quantity") ?? FindChildTextByIndex(go, 0);
         Text  nameText = FindChildText(go, "Name")     ?? FindChildTextByIndex(go, 1);
-
-        if (!isOpen)
-        {
-            bg.color = colorLocked; bg.raycastTarget = false;
-            SetActive(iconImg, false); SetActive(qtyText, false); SetActive(nameText, false);
-            return;
-        }
 
         bg.raycastTarget = true;
 
