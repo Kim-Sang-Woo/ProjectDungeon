@@ -1,25 +1,6 @@
 // ============================================================
-// EventPopupUI.cs — 이벤트 팝업 전체 UI 바인딩
+// EventPopupUI.cs — 이벤트 팝업 UI 바인딩 + 레이아웃
 // 위치: Assets/Scripts/UI/EventPopupUI.cs
-// ============================================================
-// [개요]
-//   기존 EventPopupUI를 완전 대체한다.
-//   EventPopup(로직)이 세션 데이터를 넘기면 이 컴포넌트가 UI에 반영한다.
-//
-// [씬 계층 구조]
-//   EventPopupPanel (CanvasGroup + EventPopup + EventPopupUI)
-//     ├─ Header
-//     │    └─ EventNameText        (Text)
-//     ├─ DescBlock
-//     │    └─ EventDescText        (Text + ContentSizeFitter)
-//     ├─ IllustBlock               (GameObject — 이미지 없으면 SetActive false)
-//     │    └─ EventImage           (Image)
-//     ├─ ResultBlock               (GameObject — ResultView 전용)
-//     │    └─ EventResultText      (Text + ContentSizeFitter)
-//     ├─ EffectsBlock              (GameObject — 효과 있을 때만 표시)
-//     │    └─ EffectsText          (Text + ContentSizeFitter)
-//     └─ ChoicesContainer          (VerticalLayoutGroup)
-//          └─ (ChoiceItem 프리팹 × N, 런타임 Instantiate)
 // ============================================================
 using UnityEngine;
 using UnityEngine.UI;
@@ -27,140 +8,337 @@ using UnityEngine.UI;
 public class EventPopupUI : MonoBehaviour
 {
     [Header("공통")]
-    public Text eventNameText;
-    public Text eventDescText;
+    public RectTransform header;
+    public Text          eventNameText;
 
-    [Header("이미지 (없으면 오브젝트 비활성)")]
-    public GameObject illustBlock;
-    public Image      eventImage;
+    [Header("설명 블록")]
+    public RectTransform descBlock;
+    public Text          eventDescText;
+
+    [Header("이미지 블록")]
+    public RectTransform illustBlock;
+    public Image         eventImage;
 
     [Header("결과 블록 (ResultView 전용)")]
-    public GameObject resultBlock;
-    public Text       eventResultText;
+    public RectTransform resultBlock;
+    public Text          eventResultText;
 
-    [Header("효과 블록 (효과 있을 때만 표시)")]
-    public GameObject effectsBlock;
-    public Text       effectsText;
+    [Header("효과 블록")]
+    public RectTransform effectsBlock;
+    public Text          effectsText;
 
     [Header("선택지 컨테이너")]
-    public Transform           choicesContainer;
-    public EventChoiceItemUI   choiceItemPrefab;
+    public RectTransform     choicesContainer;
+    public EventChoiceItemUI choiceItemPrefab;
 
-    // 현재 인스턴스 풀
+    [Header("레이아웃 수치")]
+    public float popupWidth    = 520f;
+    public float headerHeight  = 44f;
+    public float illustHeight  = 200f;
+    public float blockPaddingV = 18f;
+    public float paddingH      = 18f;
+    public float choiceHeight  = 30f;
+    public float choiceSpacing = 4f;
+
+    [Header("색상")]
+    public Color colorPopupBg    = new Color(0.067f, 0.063f, 0.035f, 1f);
+    public Color colorHeaderBg   = new Color(0.078f, 0.071f, 0.031f, 1f);
+    public Color colorDescBg     = new Color(0.051f, 0.047f, 0.035f, 1f);
+    public Color colorIllustBg   = new Color(0.031f, 0.027f, 0.020f, 1f);
+    public Color colorResultBg   = new Color(0.059f, 0.051f, 0.035f, 1f);
+    public Color colorEffectBg   = new Color(0.051f, 0.047f, 0.035f, 1f);
+    public Color colorChoiceBg   = new Color(0.051f, 0.047f, 0.035f, 1f);
+    public Color colorNameText   = new Color(0.910f, 0.784f, 0.439f, 1f);
+    public Color colorDescText   = new Color(0.847f, 0.784f, 0.596f, 1f);
+    public Color colorResultText = new Color(0.627f, 0.565f, 0.439f, 1f);
+    public Color colorEffectText = new Color(0.847f, 0.784f, 0.596f, 1f);
+
+    private EventPopup          popup;
     private EventChoiceItemUI[] choiceItems = new EventChoiceItemUI[5];
-
-    // EventPopup 역참조 (선택지 클릭 콜백용)
-    private EventPopup popup;
+    private bool                initialized = false;
 
     // ─────────────────────────────────────────────────────
-    private void Awake()
+    internal void EnsureInitialized()
     {
-        popup = GetComponent<EventPopup>();
-        if (popup == null) popup = GetComponentInParent<EventPopup>();
+        if (initialized) return;
+        initialized = true;
 
-        // 선택지 슬롯 미리 생성 (5개 고정 풀)
+        popup = GetComponent<EventPopup>() ?? GetComponentInParent<EventPopup>();
+
+        if (choicesContainer == null) { Debug.LogError("[EventPopupUI] choicesContainer 미연결"); return; }
+        if (choiceItemPrefab == null) { Debug.LogError("[EventPopupUI] choiceItemPrefab 미연결"); return; }
+        if (eventNameText    == null) { Debug.LogError("[EventPopupUI] eventNameText 미연결");    return; }
+        if (eventDescText    == null) { Debug.LogError("[EventPopupUI] eventDescText 미연결");    return; }
+
         for (int i = 0; i < 5; i++)
         {
-            if (choiceItemPrefab == null) break;
             var item = Instantiate(choiceItemPrefab, choicesContainer);
             item.gameObject.SetActive(false);
             choiceItems[i] = item;
         }
+
+        ApplyStaticStyle();
+        SetupChoicesContainer();
+    }
+
+    // ── 고정 스타일 (1회) ─────────────────────────────────
+    private void ApplyStaticStyle()
+    {
+        SetBg(gameObject, colorPopupBg);
+
+        if (header != null) SetBg(header.gameObject, colorHeaderBg);
+        if (eventNameText != null)
+        {
+            eventNameText.fontSize  = 13;
+            eventNameText.fontStyle = FontStyle.Bold;
+            eventNameText.color     = colorNameText;
+            eventNameText.alignment = TextAnchor.MiddleCenter;
+        }
+
+        if (descBlock != null) SetBg(descBlock.gameObject, colorDescBg);
+        if (eventDescText != null)
+        {
+            eventDescText.fontSize    = 13;
+            eventDescText.color       = colorDescText;
+            eventDescText.alignment   = TextAnchor.UpperLeft;
+            eventDescText.lineSpacing = 1.6f;
+            eventDescText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            eventDescText.verticalOverflow   = VerticalWrapMode.Overflow;
+        }
+
+        if (illustBlock != null) SetBg(illustBlock.gameObject, colorIllustBg);
+        if (eventImage != null)
+        {
+            eventImage.type           = Image.Type.Simple;
+            eventImage.preserveAspect = true;
+            RectTransform rt = eventImage.rectTransform;
+            rt.anchorMin = new Vector2(0f, 0f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+        }
+
+        if (resultBlock != null) SetBg(resultBlock.gameObject, colorResultBg);
+        if (eventResultText != null)
+        {
+            eventResultText.fontSize    = 13;
+            eventResultText.fontStyle   = FontStyle.Italic;
+            eventResultText.color       = colorResultText;
+            eventResultText.alignment   = TextAnchor.UpperLeft;
+            eventResultText.lineSpacing = 1.6f;
+            eventResultText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            eventResultText.verticalOverflow   = VerticalWrapMode.Overflow;
+        }
+
+        if (effectsBlock != null) SetBg(effectsBlock.gameObject, colorEffectBg);
+        if (effectsText != null)
+        {
+            effectsText.fontSize        = 13;
+            effectsText.color           = colorEffectText;
+            effectsText.alignment       = TextAnchor.UpperLeft;
+            effectsText.lineSpacing     = 1.6f;
+            effectsText.supportRichText = true;
+            effectsText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            effectsText.verticalOverflow   = VerticalWrapMode.Overflow;
+        }
+
+        if (choicesContainer != null) SetBg(choicesContainer.gameObject, colorChoiceBg);
+
+        foreach (var item in choiceItems)
+        {
+            if (item == null) continue;
+            SetBg(item.gameObject, new Color(1f, 1f, 1f, 0.018f));
+            LayoutElement le = item.GetComponent<LayoutElement>() ?? item.gameObject.AddComponent<LayoutElement>();
+            le.preferredHeight = choiceHeight;
+            le.minHeight       = choiceHeight;
+            if (item.numText   != null) { item.numText.fontSize = 13; item.numText.fontStyle = FontStyle.Bold; item.numText.color = new Color(0.784f, 0.627f, 0.251f); }
+            if (item.badgeText != null) { item.badgeText.fontSize = 11; item.badgeText.fontStyle = FontStyle.Bold; }
+            if (item.labelText != null) { item.labelText.fontSize = 12; item.labelText.color = new Color(0.847f, 0.784f, 0.596f); }
+            item.ApplyLayout(choiceHeight, paddingH);
+        }
+    }
+
+    private void SetupChoicesContainer()
+    {
+        VerticalLayoutGroup vlg = choicesContainer.GetComponent<VerticalLayoutGroup>()
+                                  ?? choicesContainer.gameObject.AddComponent<VerticalLayoutGroup>();
+        vlg.spacing                = choiceSpacing;
+        vlg.padding                = new RectOffset((int)paddingH, (int)paddingH, (int)blockPaddingV, (int)blockPaddingV);
+        vlg.childForceExpandWidth  = true;
+        vlg.childForceExpandHeight = false;
+        vlg.childControlWidth      = true;
+        vlg.childControlHeight     = true;
+    }
+
+    // ── 동적 레이아웃 (뷰 전환마다) ──────────────────────
+    private void RebuildLayout()
+    {
+        RectTransform panelRT = GetComponent<RectTransform>();
+        panelRT.anchorMin = new Vector2(0.5f, 0.5f);
+        panelRT.anchorMax = new Vector2(0.5f, 0.5f);
+        panelRT.pivot     = new Vector2(0.5f, 0.5f);
+
+        float totalH = 0f;
+
+        if (header != null)
+        {
+            PlaceBlock(header, totalH, headerHeight);
+            FillText(eventNameText, header);
+            totalH += headerHeight;
+        }
+
+        if (descBlock != null)
+        {
+            float h = CalcTextHeight(eventDescText) + blockPaddingV * 2f;
+            h = Mathf.Max(h, 30f);
+            PlaceBlock(descBlock, totalH, h);
+            FillText(eventDescText, descBlock);
+            totalH += h;
+        }
+
+        if (illustBlock != null && illustBlock.gameObject.activeSelf)
+        {
+            PlaceBlock(illustBlock, totalH, illustHeight);
+            totalH += illustHeight;
+        }
+
+        if (resultBlock != null && resultBlock.gameObject.activeSelf)
+        {
+            float h = CalcTextHeight(eventResultText) + blockPaddingV * 2f;
+            h = Mathf.Max(h, 30f);
+            PlaceBlock(resultBlock, totalH, h);
+            FillText(eventResultText, resultBlock);
+            totalH += h;
+        }
+
+        if (effectsBlock != null && effectsBlock.gameObject.activeSelf)
+        {
+            float h = CalcTextHeight(effectsText) + blockPaddingV * 2f;
+            h = Mathf.Max(h, 30f);
+            PlaceBlock(effectsBlock, totalH, h);
+            FillText(effectsText, effectsBlock);
+            totalH += h;
+        }
+
+        if (choicesContainer != null)
+        {
+            int visible = 0;
+            foreach (var item in choiceItems)
+                if (item != null && item.gameObject.activeSelf) visible++;
+
+            float h = visible * (choiceHeight + choiceSpacing) - choiceSpacing + blockPaddingV * 2f;
+            h = Mathf.Max(h, 40f);
+            PlaceBlock(choicesContainer, totalH, h);
+            totalH += h;
+        }
+
+        panelRT.sizeDelta        = new Vector2(popupWidth, totalH);
+        panelRT.anchoredPosition = Vector2.zero;
+
+        // 색상 재적용 (SetActive 이후 확실히 반영)
+        SetBg(gameObject, colorPopupBg);
+        if (header           != null) SetBg(header.gameObject,           colorHeaderBg);
+        if (descBlock        != null) SetBg(descBlock.gameObject,        colorDescBg);
+        if (illustBlock      != null) SetBg(illustBlock.gameObject,      colorIllustBg);
+        if (resultBlock      != null) SetBg(resultBlock.gameObject,      colorResultBg);
+        if (effectsBlock     != null) SetBg(effectsBlock.gameObject,     colorEffectBg);
+        if (choicesContainer != null) SetBg(choicesContainer.gameObject, colorChoiceBg);
+
+        LayoutRebuilder.ForceRebuildLayoutImmediate(panelRT);
+    }
+
+    // ── 블록 배치 헬퍼 ────────────────────────────────────
+
+    private void PlaceBlock(RectTransform rt, float offsetFromTop, float height)
+    {
+        rt.anchorMin        = new Vector2(0f, 1f);
+        rt.anchorMax        = new Vector2(1f, 1f);
+        rt.pivot            = new Vector2(0.5f, 1f);
+        rt.anchoredPosition = new Vector2(0f, -offsetFromTop);
+        rt.sizeDelta        = new Vector2(0f, height);
+    }
+
+    private void FillText(Text t, RectTransform block)
+    {
+        if (t == null) return;
+        RectTransform rt = t.rectTransform;
+        rt.anchorMin = new Vector2(0f, 0f);
+        rt.anchorMax = new Vector2(1f, 1f);
+        rt.pivot     = new Vector2(0.5f, 0.5f);
+        rt.offsetMin = new Vector2(paddingH,  blockPaddingV);
+        rt.offsetMax = new Vector2(-paddingH, -blockPaddingV);
+    }
+
+    private float CalcTextHeight(Text t)
+    {
+        if (t == null || string.IsNullOrEmpty(t.text)) return 0f;
+        float lineH       = t.fontSize * t.lineSpacing;
+        float innerWidth  = popupWidth - paddingH * 2f;
+        int   charPerLine = Mathf.Max(1, Mathf.FloorToInt(innerWidth / (t.fontSize * 0.55f)));
+        int   lines       = Mathf.CeilToInt((float)t.text.Length / charPerLine);
+        lines = Mathf.Max(lines, t.text.Split('\n').Length);
+        return lines * lineH;
     }
 
     // ── 뷰 바인딩 ─────────────────────────────────────────
 
-    /// <summary>ChoiceView 데이터를 UI에 반영한다.</summary>
     public void BindChoiceView(EventSession session)
     {
-        // 공통
-        SetEventName(session.sourceData.eventName);
+        SetName(session.sourceData.eventName);
         SetDesc(session.sourceData.desc);
         SetImage(session.sourceData.image);
-
-        // ResultView 전용 블록 숨기기
-        if (resultBlock  != null) resultBlock.SetActive(false);
-        if (effectsBlock != null) effectsBlock.SetActive(false);
-
-        // 선택지 바인딩
+        if (resultBlock  != null) resultBlock.gameObject.SetActive(false);
+        if (effectsBlock != null) effectsBlock.gameObject.SetActive(false);
         BindChoices(session);
+        RebuildLayout();
     }
 
-    /// <summary>ResultView 데이터를 UI에 반영한다.</summary>
     public void BindResultView(EventSession session)
     {
         EventResult result = session.currentResult;
-
-        // 공통 (이름·설명 유지)
-        SetEventName(session.sourceData.eventName);
+        SetName(session.sourceData.eventName);
         SetDesc(session.sourceData.desc);
+        if (result.resultImage != null) SetImage(result.resultImage);
 
-        // 이미지: resultImage 우선, null이면 기존 유지
-        if (result.resultImage != null)
-            SetImage(result.resultImage);
-
-        // 결과 설명
-        if (resultBlock != null) resultBlock.SetActive(!string.IsNullOrEmpty(result.resultDesc));
+        bool hasResult = !string.IsNullOrEmpty(result.resultDesc);
+        if (resultBlock     != null) resultBlock.gameObject.SetActive(hasResult);
         if (eventResultText != null) eventResultText.text = result.resultDesc;
 
-        // 효과 텍스트
         bool hasEffect = !string.IsNullOrEmpty(session.effectSummaryText);
-        if (effectsBlock != null) effectsBlock.SetActive(hasEffect);
+        if (effectsBlock != null) effectsBlock.gameObject.SetActive(hasEffect);
         if (effectsText  != null) effectsText.text = session.effectSummaryText;
 
-        // 선택지 바인딩
         BindChoices(session);
-
-        // ContentSizeFitter 강제 갱신
-        ForceLayoutRefresh();
+        RebuildLayout();
     }
 
     // ── 내부 헬퍼 ─────────────────────────────────────────
 
-    private void SetEventName(string name)
-    {
-        if (eventNameText != null) eventNameText.text = name;
-    }
+    private void SetName(string n) { if (eventNameText != null) eventNameText.text = n; }
+    private void SetDesc(string d) { if (eventDescText != null) eventDescText.text = d; }
 
-    private void SetDesc(string desc)
+    private void SetImage(Sprite s)
     {
-        if (eventDescText != null)
-        {
-            eventDescText.text = desc;
-            ForceLayoutRefresh(eventDescText.rectTransform);
-        }
-    }
-
-    private void SetImage(Sprite sprite)
-    {
-        if (illustBlock != null) illustBlock.SetActive(sprite != null);
-        if (eventImage  != null && sprite != null) eventImage.sprite = sprite;
+        if (illustBlock != null) illustBlock.gameObject.SetActive(s != null);
+        if (eventImage  != null && s != null) eventImage.sprite = s;
     }
 
     private void BindChoices(EventSession session)
     {
         var list = session.resolvedChoices;
-
         for (int i = 0; i < 5; i++)
         {
             if (choiceItems[i] == null) continue;
-
-            if (i < list.Count)
-            {
-                int captured = i; // 클로저 캡처용
-                choiceItems[i].Bind(list[i], () => popup?.SelectChoice(captured));
-            }
-            else
-            {
-                choiceItems[i].gameObject.SetActive(false);
-            }
+            if (i < list.Count) { int c = i; choiceItems[i].Bind(list[i], () => popup?.SelectChoice(c)); }
+            else                { choiceItems[i].gameObject.SetActive(false); }
         }
     }
 
-    private void ForceLayoutRefresh(RectTransform target = null)
+    private void SetBg(GameObject go, Color color)
     {
-        RectTransform rt = target ?? GetComponent<RectTransform>();
-        if (rt != null)
-            LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
+        Image img = go.GetComponent<Image>() ?? go.AddComponent<Image>();
+        img.type   = Image.Type.Simple;
+        img.sprite = null;
+        img.color  = color;
     }
 }

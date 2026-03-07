@@ -1,11 +1,9 @@
 fileFormatVersion: 2
-guid: bda9daa1e2e12374090f782eeb6dd4d7
+guid: 00dbc6f6c6a0ccd4eb045f155a116021
 MonoImporter:
   externalObjects: {}
   serializedVersion: 2
-  defaultReferences:
-  - sprite: {instanceID: 0}
-  - eventOverride: {fileID: 11400000, guid: e7ed2221f20f7734da8aa6de1c8dc3e0, type: 2}
+  defaultReferences: []
   executionOrder: 0
   icon: {instanceID: 0}
   userData: 

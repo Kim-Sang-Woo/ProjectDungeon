@@ -75,4 +75,18 @@ public class DungeonObjectData : ScriptableObject
     [Header("액션 목록")]
     [Tooltip("인터렉션 UI에 표시할 액션 목록. 순서대로 표시된다.")]
     public ObjectAction[] actions;
+
+    [Header("이벤트 연결")]
+    [Tooltip("직접 구성한 EventData SO를 연결하면 팩토리 자동 생성 대신 이 데이터를 사용한다.\n" +
+             "null이면 rewardItems / objectType 기반으로 자동 생성.")]
+    public EventData eventOverride;
+
+    [Header("팩토리 선택지 문구 (eventOverride가 null일 때 적용)")]
+    [Tooltip("선택지 1번 문구. 비어 있으면 기본값 사용.\n" +
+             "보물상자 기본: '상자를 연다.' / 계단 기본: '계단을 내려간다.' 또는 '계단을 올라간다.'")]
+    public string choiceActionLabel;
+
+    [Tooltip("선택지 2번(닫기) 문구. 비어 있으면 기본값 사용.\n" +
+             "보물상자 기본: '그냥 지나친다.' / 계단 기본: '머무른다.'")]
+    public string choiceCloseLabel;
 }

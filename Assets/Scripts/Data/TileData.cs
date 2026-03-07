@@ -24,6 +24,12 @@ public class TileData
     /// <summary>이벤트 소진 여부</summary>
     public bool isEventConsumed;
 
+    /// <summary>
+    /// [이벤트 시스템 v2] 신규 이벤트 SO 참조.
+    /// null이면 이벤트 없음. EventTrigger가 이 필드를 사용한다.
+    /// </summary>
+    public EventData eventSO;
+
     /// <summary>이 타일에 배치된 오브젝트. null이면 오브젝트 없음</summary>
     public DungeonObjectData placedObject;
 
