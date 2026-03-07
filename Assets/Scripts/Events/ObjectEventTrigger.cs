@@ -88,10 +88,6 @@ public class ObjectEventTrigger : MonoBehaviour
 
         switch (obj.objectType)
         {
-            case DungeonObjectType.TREASURE_CHEST:
-                HandleTreasureChest(tilePos, tile, obj);
-                break;
-
             case DungeonObjectType.STAIRS_DOWN:
                 HandleStairs(tilePos, obj, isDown: true);
                 break;
@@ -99,23 +95,45 @@ public class ObjectEventTrigger : MonoBehaviour
             case DungeonObjectType.STAIRS_UP:
                 HandleStairs(tilePos, obj, isDown: false);
                 break;
+
+            case DungeonObjectType.GENERIC:
+            default:
+                // eventOverride SO가 있으면 해당 EventData로 팝업 열기
+                // isOneTime이면 닫힐 때 오브젝트 소진 처리
+                HandleGenericObject(tilePos, tile, obj);
+                break;
         }
     }
 
-    // ── 보물 상자 ─────────────────────────────────────────
+    // ── 일반 오브젝트 (eventOverride 사용) ──────────────────
 
-    private void HandleTreasureChest(Vector2Int tilePos, TileData tile, DungeonObjectData obj)
+    private void HandleGenericObject(Vector2Int tilePos, TileData tile, DungeonObjectData obj)
     {
-        movementSystem.LockInput();
-        Debug.Log($"[ObjectEventTrigger] 보물 상자: {obj.displayName} ({tilePos})");
+        if (obj.eventOverride == null)
+        {
+            Debug.LogWarning($"[ObjectEventTrigger] {obj.objectId}: eventOverride가 없고 처리 루틴도 없습니다.");
+            return;
+        }
 
-        // eventOverride 우선 사용, null이면 팩토리 자동 생성
-        EventData data = obj.eventOverride != null
-            ? obj.eventOverride
-            : EventData.FromTreasureChest(obj, tilePos, tile, dungeonObjectSpawner);
-        // desc가 비어 있으면 DungeonObjectData.description 폴백
+        movementSystem.LockInput();
+        Debug.Log($"[ObjectEventTrigger] 오브젝트 이벤트: {obj.displayName} ({tilePos})");
+
+        EventData data = obj.eventOverride;
         ApplyDescFallback(data, obj);
-        eventPopup?.Open(data);
+
+        // isOneTime이면 팝업이 닫힐 때 오브젝트를 소진(비활성화)한다.
+        System.Action consumeCallback = null;
+        if (obj.isOneTime)
+        {
+            consumeCallback = () =>
+            {
+                tile.isObjectInteracted = true;
+                dungeonObjectSpawner?.RemoveAt(tilePos);
+                Debug.Log($"[ObjectEventTrigger] 오브젝트 소진: {obj.objectId} ({tilePos})");
+            };
+        }
+
+        eventPopup?.Open(data, consumeCallback);
     }
 
     // ── 계단 ──────────────────────────────────────────────

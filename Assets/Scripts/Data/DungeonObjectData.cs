@@ -65,20 +65,13 @@ public class DungeonObjectData : ScriptableObject
     [Min(0)]
     public int spawnWeight = 5;
 
-    [Header("보상 아이템 (보물 상자 등)")]
-    [Tooltip("상호작용 시 지급할 아이템 목록")]
-    public ItemData[] rewardItems;
-
-    [Tooltip("각 아이템의 지급 수량 (rewardItems와 같은 인덱스)")]
-    public int[] rewardQuantities;
-
     [Header("액션 목록")]
     [Tooltip("인터렉션 UI에 표시할 액션 목록. 순서대로 표시된다.")]
     public ObjectAction[] actions;
 
     [Header("이벤트 연결")]
     [Tooltip("직접 구성한 EventData SO를 연결하면 팩토리 자동 생성 대신 이 데이터를 사용한다.\n" +
-             "null이면 rewardItems / objectType 기반으로 자동 생성.")]
+             "null이면 objectType 기반으로 자동 생성.")]
     public EventData eventOverride;
 
     [Header("팩토리 선택지 문구 (eventOverride가 null일 때 적용)")]

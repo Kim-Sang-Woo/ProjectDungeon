@@ -27,7 +27,7 @@ public enum StatType
 /// <summary>장비 타입 — 슬롯 식별자</summary>
 public enum EquipType { Weapon, Helmet, Necklace, Gloves, Armor, Ring, Amulet, Boots, Bag }
 
-public enum DungeonObjectType { TREASURE_CHEST, STAIRS_DOWN, STAIRS_UP }
+public enum DungeonObjectType { GENERIC = 0, STAIRS_DOWN = 1, STAIRS_UP = 2 }
 
 // ────────────────────────────────────────────────────────
 // 이벤트 시스템

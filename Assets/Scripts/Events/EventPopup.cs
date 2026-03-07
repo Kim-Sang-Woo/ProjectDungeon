@@ -26,8 +26,10 @@ public class EventPopup : MonoBehaviour
     public MovementSystem movementSystem;
 
     // ── 런타임 ─────────────────────────────────────────────
-    private EventSession session;
-    private bool         isOpen = false;
+    private EventSession  session;
+    private bool          isOpen          = false;
+    private System.Action consumeCallback;      // 팝업 닫힐 때 오브젝트 소진 처리
+    private bool          consumeReady    = false; // Result 확인 후에만 소진 실행
 
     // ─────────────────────────────────────────────────────
     private void Awake()
@@ -44,12 +46,20 @@ public class EventPopup : MonoBehaviour
     // ── 열기 / 닫기 ───────────────────────────────────────
 
     /// <summary>이벤트 팝업을 열고 ChoiceView를 표시한다.</summary>
-    public void Open(EventData data)
+    public void Open(EventData data) => Open(data, null);
+
+    /// <summary>
+    /// 이벤트 팝업을 열고 ChoiceView를 표시한다.
+    /// onClose: 팝업이 닫힐 때 실행할 콜백 (isOneTime 오브젝트 소진 처리 등)
+    /// </summary>
+    public void Open(EventData data, System.Action onClose)
     {
         if (data == null) return;
 
-        session = new EventSession();
+        session         = new EventSession();
         session.Initialize(data);
+        consumeCallback = onClose;
+        consumeReady    = false; // Result 확인 전까지 소진 비활성
 
         isOpen = true;
         gameObject.SetActive(true);   // SetActive(true) 먼저
@@ -65,7 +75,15 @@ public class EventPopup : MonoBehaviour
         isOpen = false;
         gameObject.SetActive(false);
         movementSystem?.UnlockInput();
+        // isOneTime 오브젝트 소진 처리
+        // consumeReady가 true일 때만 실행 — Result를 확인한 후 닫을 때만 소진
+        // '그냥 지나친다' 등 Result 없이 닫으면 소진하지 않음
+        if (consumeReady) consumeCallback?.Invoke();
+        consumeCallback = null;
+        consumeReady    = false;
         session = null;
+        // RewardPopupPanel도 함께 닫기
+        RewardManager.Instance?.ClosePopup();
     }
 
     // ── 선택지 실행 (UI → 콜백) ───────────────────────────
@@ -92,10 +110,10 @@ public class EventPopup : MonoBehaviour
         if (rc == null) { Debug.LogError("[EventPopup] rc가 null"); return; }
 
         EventChoice choice = rc.source;
-        if (choice == null) { Debug.LogError("[EventPopup] rc.source(EventChoice)가 null — Inspector에서 Choice SO 연결을 확인하세요."); Close(); return; }
 
-        // 닫기 선택지
-        if (choice.choiceType == ChoiceType.Close)
+        // source가 null이거나 ChoiceType.Close이면 정상 닫기
+        // (자동 생성 닫기 선택지는 source = null, badgeType = Close)
+        if (choice == null || choice.choiceType == ChoiceType.Close)
         {
             Close();
             return;
@@ -119,6 +137,9 @@ public class EventPopup : MonoBehaviour
             Close();
             return;
         }
+
+        // Result 진입 — 이제 닫힐 때 오브젝트 소진 허용
+        consumeReady = true;
 
         // 효과 실행
         if (result.effects != null && result.effects.Length > 0)

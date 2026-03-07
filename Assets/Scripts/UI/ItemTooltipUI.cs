@@ -47,6 +47,7 @@ public class ItemTooltipUI : MonoBehaviour
     public float offset = 8f;
 
     private Canvas rootCanvas;
+    private bool   isShowing = false;
 
     // ────────────────────────────────────────────────────────
     private void Awake()
@@ -56,6 +57,11 @@ public class ItemTooltipUI : MonoBehaviour
 
         rootCanvas = GetComponentInParent<Canvas>();
         if (rootCanvas != null) rootCanvas = rootCanvas.rootCanvas;
+
+        // 항상 Canvas의 맨 위(마지막 Sibling)에 위치해 다른 패널에 가리지 않도록 한다.
+        if (rootCanvas != null)
+            transform.SetParent(rootCanvas.transform, true);
+        transform.SetAsLastSibling();
 
         // anchor 중앙(0.5, 0.5) 고정 — anchoredPosition을 Canvas 중앙 기준으로 사용
         // pivot (0, 1) — 툴팁 박스는 좌상단 기준으로 펼쳐짐
@@ -80,7 +86,17 @@ public class ItemTooltipUI : MonoBehaviour
         PopulateInventoryItem(slot);
         ShowImmediate();
         RefreshLayout();
-        PositionAtSlot(slotRect);
+    }
+
+    /// <summary>ItemData만 있는 슬롯(RewardPopup 등)에서 툴팁 표시.</summary>
+    public void ShowForItem(ItemData item, int quantity, RectTransform slotRect)
+    {
+        if (item == null) return;
+        // InventorySlot 임시 생성으로 기존 Populate 재사용
+        var tempSlot = new InventorySlot(item, quantity);
+        PopulateInventoryItem(tempSlot);
+        ShowImmediate();
+        RefreshLayout();
     }
 
     public void ShowForEquip(EquipData equip, RectTransform slotRect)
@@ -89,7 +105,6 @@ public class ItemTooltipUI : MonoBehaviour
         PopulateEquipItem(equip);
         ShowImmediate();
         RefreshLayout();
-        PositionAtSlot(slotRect);
     }
 
     public void Hide() => HideImmediate();
@@ -97,54 +112,6 @@ public class ItemTooltipUI : MonoBehaviour
     // ────────────────────────────────────────────────────────
     // 위치 계산 — 슬롯 기준
     // ────────────────────────────────────────────────────────
-
-    private void PositionAtSlot(RectTransform slotRect)
-    {
-        if (tooltipRect == null || tooltipRect.parent == null) return;
-
-        RectTransform parentRT = tooltipRect.parent as RectTransform;
-        if (parentRT == null) return;
-
-        Camera cam = (rootCanvas != null && rootCanvas.renderMode != RenderMode.ScreenSpaceOverlay)
-            ? rootCanvas.worldCamera : null;
-
-        // 슬롯 네 꼭짓점 스크린 좌표
-        // ScreenSpaceOverlay: GetWorldCorners() = 스크린 픽셀 좌표 그대로
-        Vector3[] corners = new Vector3[4];
-        slotRect.GetWorldCorners(corners);
-        // [0]=좌하 [1]=좌상 [2]=우상 [3]=우하
-
-        Vector2 screenRightBottom = new Vector2(corners[3].x, corners[0].y);
-        Vector2 screenRightTop    = new Vector2(corners[2].x, corners[1].y);
-
-        RectTransformUtility.ScreenPointToLocalPointInRectangle(
-            parentRT, screenRightBottom, cam, out Vector2 localRB);
-        RectTransformUtility.ScreenPointToLocalPointInRectangle(
-            parentRT, screenRightTop,    cam, out Vector2 localRT2);
-
-        float tw = tooltipRect.rect.width;
-        float th = tooltipRect.rect.height;
-        float pw = parentRT.rect.width;
-        float ph = parentRT.rect.height;
-
-        // 기본: 슬롯 오른쪽 아래
-        float x = localRB.x + offset;
-        float y = localRB.y - offset;
-
-        // 오른쪽 밖 → 슬롯 왼쪽
-        if (x + tw > pw * 0.5f)
-        {
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                parentRT, new Vector2(corners[0].x, corners[0].y), cam, out Vector2 localLB);
-            x = localLB.x - tw - offset;
-        }
-
-        // 아래쪽 밖 → 슬롯 위
-        if (y - th < -ph * 0.5f)
-            y = localRT2.y + offset;
-
-        tooltipRect.anchoredPosition = new Vector2(x, y);
-    }
 
     // ────────────────────────────────────────────────────────
     // 내용 채우기
@@ -260,14 +227,38 @@ public class ItemTooltipUI : MonoBehaviour
 
     private void ShowImmediate()
     {
+        // 매 Show마다 최상위 Sibling으로 올려 다른 패널에 가리지 않도록 한다.
+        transform.SetAsLastSibling();
+        isShowing = true;
         if (canvasGroup == null) return;
         canvasGroup.alpha          = 1f;
         canvasGroup.interactable   = false;
         canvasGroup.blocksRaycasts = false;
     }
 
+    private void Update()
+    {
+        if (!isShowing || tooltipRect == null) return;
+        FollowMouse();
+    }
+
+    private void FollowMouse()
+    {
+        RectTransform parentRT = tooltipRect.parent as RectTransform;
+        if (parentRT == null) return;
+
+        Camera cam = (rootCanvas != null && rootCanvas.renderMode != RenderMode.ScreenSpaceOverlay)
+            ? rootCanvas.worldCamera : null;
+
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(
+            parentRT, Input.mousePosition, cam, out Vector2 localMouse);
+
+        tooltipRect.anchoredPosition = new Vector2(localMouse.x + offset, localMouse.y + offset);
+    }
+
     private void HideImmediate()
     {
+        isShowing = false;
         if (canvasGroup == null) return;
         canvasGroup.alpha          = 0f;
         canvasGroup.interactable   = false;

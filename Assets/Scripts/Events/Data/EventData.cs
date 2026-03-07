@@ -4,7 +4,7 @@
 // ============================================================
 // [개요]
 //   이벤트 한 건의 모든 정적 데이터를 담는 SO.
-//   FromTreasureChest / FromStairs 팩토리 메서드로
+//   FromStairs 팩토리 메서드로
 //   DungeonObjectData를 EventData로 런타임 변환한다.
 // ============================================================
 using UnityEngine;
@@ -40,70 +40,6 @@ public class EventData : ScriptableObject
     // ScriptableObject.CreateInstance로 휘발성 SO를 생성한다.
     // 팝업이 닫히면 GC가 수거한다 (에셋 등록 불필요).
     // ────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// 보물 상자 DungeonObjectData를 EventData로 변환한다.
-    /// 선택지: [열기] → GainItemEffect 실행 / [그냥 지나친다] → 닫기
-    /// </summary>
-    public static EventData FromTreasureChest(
-        DungeonObjectData obj,
-        Vector2Int        tilePos,
-        TileData          tile,
-        DungeonObjectSpawner spawner)
-    {
-        var data = CreateInstance<EventData>();
-        data.eventId   = $"obj_{obj.objectId}_{tilePos.x}_{tilePos.y}";
-        data.eventName = obj.displayName;
-        data.desc      = obj.description;
-        data.image     = obj.sprite;
-
-        // ── 결과: 열기 성공 ──────────────────────────────
-        var openResult = CreateInstance<EventResult>();
-        openResult.resultId   = "open_success";
-        openResult.resultDesc = "상자가 열렸다.";
-
-        // GainItemEffect 목록 생성
-        var effects = new System.Collections.Generic.List<EventEffect>();
-        if (obj.rewardItems != null)
-        {
-            for (int i = 0; i < obj.rewardItems.Length; i++)
-            {
-                if (obj.rewardItems[i] == null) continue;
-                int qty = (obj.rewardQuantities != null && i < obj.rewardQuantities.Length)
-                    ? Mathf.Max(1, obj.rewardQuantities[i]) : 1;
-
-                effects.Add(new GainItemEffect { item = obj.rewardItems[i], amount = qty });
-            }
-        }
-
-        // 보물상자 소진 효과 (isOneTime)
-        if (obj.isOneTime)
-            effects.Add(new ConsumeObjectEffect { tilePos = tilePos, tile = tile, spawner = spawner });
-
-        openResult.effects     = effects.ToArray();
-        openResult.nextChoices = new EventChoice[0]; // 닫기 선택지 자동 추가
-
-        // 기본 문구 — DungeonObjectData.choiceActionLabel/choiceCloseLabel 우선 사용
-        string actionLabel = !string.IsNullOrEmpty(obj.choiceActionLabel) ? obj.choiceActionLabel : "상자를 연다.";
-        string closeLabel  = !string.IsNullOrEmpty(obj.choiceCloseLabel)  ? obj.choiceCloseLabel  : "그냥 지나친다.";
-
-        // ── 선택지 1: 열기 ──────────────────────────────
-        var openChoice = CreateInstance<EventChoice>();
-        openChoice.choiceId     = "open";
-        openChoice.choiceType   = ChoiceType.Default;
-        openChoice.label        = actionLabel;
-        openChoice.successRate  = 100;
-        openChoice.onSuccess    = openResult;
-
-        // ── 선택지 2: 닫기 ──────────────────────────────
-        var closeChoice = CreateInstance<EventChoice>();
-        closeChoice.choiceId   = "ignore";
-        closeChoice.choiceType = ChoiceType.Close;
-        closeChoice.label      = closeLabel;
-
-        data.choices = new EventChoice[] { openChoice, closeChoice };
-        return data;
-    }
 
     /// <summary>
     /// 계단 DungeonObjectData를 EventData로 변환한다.
