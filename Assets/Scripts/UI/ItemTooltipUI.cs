@@ -66,6 +66,7 @@ public class ItemTooltipUI : MonoBehaviour
             tooltipRect.pivot     = new Vector2(0f,   1f);
         }
 
+        SetupAutoLayout();
         HideImmediate();
     }
 
@@ -78,7 +79,7 @@ public class ItemTooltipUI : MonoBehaviour
         if (slot == null || slot.item == null) return;
         PopulateInventoryItem(slot);
         ShowImmediate();
-        Canvas.ForceUpdateCanvases();
+        RefreshLayout();
         PositionAtSlot(slotRect);
     }
 
@@ -87,7 +88,7 @@ public class ItemTooltipUI : MonoBehaviour
         if (equip == null) return;
         PopulateEquipItem(equip);
         ShowImmediate();
-        Canvas.ForceUpdateCanvases();
+        RefreshLayout();
         PositionAtSlot(slotRect);
     }
 
@@ -178,8 +179,8 @@ public class ItemTooltipUI : MonoBehaviour
 
         if (tooltipPriceWeightText != null)
         {
-            string qty = item.isStackable && slot.quantity > 1 ? $"  ×{slot.quantity}" : "";
-            tooltipPriceWeightText.text = $"💰 {item.price}{qty}    ⚖ {item.weight:F1} kg";
+            string qty = item.isStackable && slot.quantity > 1 ? $"(x{slot.quantity})" : "";
+            tooltipPriceWeightText.text = $"{item.price}G{qty}  [{item.weight:F1} Kg]";
         }
     }
 
@@ -196,12 +197,66 @@ public class ItemTooltipUI : MonoBehaviour
 
         if (tooltipDescText != null) tooltipDescText.text = equip.description;
         if (tooltipPriceWeightText != null)
-            tooltipPriceWeightText.text = $"💰 {equip.price}    ⚖ {equip.weight:F1} kg";
+            tooltipPriceWeightText.text = $"{equip.price}G  [{equip.weight:F1} Kg]";
     }
 
     // ────────────────────────────────────────────────────────
     // 표시/숨김
     // ────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────
+    // 자동 레이아웃 설정
+    // ────────────────────────────────────────────────────────
+
+    private void SetupAutoLayout()
+    {
+        if (tooltipRect == null) return;
+        GameObject panel = tooltipRect.gameObject;
+
+        // ── Vertical Layout Group ──
+        VerticalLayoutGroup vlg = panel.GetComponent<VerticalLayoutGroup>()
+                                ?? panel.AddComponent<VerticalLayoutGroup>();
+        vlg.padding             = new RectOffset(10, 10, 10, 10);
+        vlg.spacing             = 8f;
+        vlg.childAlignment      = TextAnchor.UpperLeft;
+        vlg.childControlWidth   = true;
+        vlg.childControlHeight  = true;   // 자식 높이를 내용에 맞게 제어
+        vlg.childForceExpandWidth  = true;
+        vlg.childForceExpandHeight = false;
+
+        // ── Content Size Fitter ──
+        ContentSizeFitter csf = panel.GetComponent<ContentSizeFitter>()
+                              ?? panel.AddComponent<ContentSizeFitter>();
+        csf.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        csf.verticalFit   = ContentSizeFitter.FitMode.PreferredSize;
+
+        // ── 각 Text 자식: Height 고정 해제 + 자동 줄바꿈 ──
+        Text[] texts = { tooltipNameText, tooltipTypeText,
+                         tooltipStatsText, tooltipDescText, tooltipPriceWeightText };
+        foreach (Text t in texts)
+        {
+            if (t == null) continue;
+
+            // 텍스트 줄바꿈 설정
+            t.horizontalOverflow = HorizontalWrapMode.Wrap;
+            t.verticalOverflow   = VerticalWrapMode.Overflow;
+
+            // Layout Element — 고정 Height 해제, preferred height는 텍스트가 자동 계산
+            LayoutElement le = t.GetComponent<LayoutElement>()
+                             ?? t.gameObject.AddComponent<LayoutElement>();
+            le.minHeight        = -1;   // 제한 없음
+            le.preferredHeight  = -1;   // 텍스트 내용에 따라 자동
+            le.flexibleWidth    = 1f;
+            le.flexibleHeight   = 0f;   // 세로 강제 확장 금지 (내용 크기만큼만)
+        }
+    }
+
+    /// <summary>내용 변경 후 패널 크기를 즉시 갱신</summary>
+    private void RefreshLayout()
+    {
+        if (tooltipRect == null) return;
+        LayoutRebuilder.ForceRebuildLayoutImmediate(tooltipRect);
+    }
 
     private void ShowImmediate()
     {
