@@ -87,18 +87,32 @@ public class EquipmentManager : MonoBehaviour
     {
         if (!equipped.TryGetValue(slot, out var equip) || equip == null) return;
 
-        // 가방 해제 시 슬롯 감소 여부 체크
+        // 장비 해제 시 인벤토리 슬롯 여유 체크
+        // (해제된 장비가 인벤토리로 반환되므로 빈 슬롯 1개 이상 필요)
         if (equip.equipType == EquipType.Bag && equip.statMaxItemSlot > 0)
         {
-            int currentItems  = Inventory.Instance != null ? Inventory.Instance.CurrentItemCount : 0;
-            int currentMax    = Inventory.Instance != null ? Inventory.Instance.MaxItemCount : 0;
-            int afterMax      = currentMax - equip.statMaxItemSlot;
+            // 가방: 해제 후 슬롯 감소 + 가방 자체 반환 슬롯 필요
+            int currentItems = Inventory.Instance != null ? Inventory.Instance.CurrentItemCount : 0;
+            int currentMax   = Inventory.Instance != null ? Inventory.Instance.MaxItemCount : 0;
+            int afterMax     = currentMax - equip.statMaxItemSlot;
 
-            // 가방 자체도 인벤토리로 반환되므로 슬롯 1개 추가 필요
             if (currentItems > afterMax - 1)
             {
                 FloatingTextUI.Instance?.Show("가방을 해제할 수 없습니다.", FloatingTextUI.ColorFail);
-                Debug.Log($"[EquipmentManager] 가방 해제 불가 — 현재 아이템:{currentItems} 해제 후 슬롯:{afterMax}");
+                Debug.Log($"[EquipmentManager] 가방 해제 불가 — 현재 아이템:{currentItems} 해제 후 슬롯:{afterMax - 1}");
+                return;
+            }
+        }
+        else if (equip.equipType != EquipType.Bag)
+        {
+            // 가방 외 장비: 반환 슬롯 1개만 필요
+            int currentItems = Inventory.Instance != null ? Inventory.Instance.CurrentItemCount : 0;
+            int currentMax   = Inventory.Instance != null ? Inventory.Instance.MaxItemCount : 0;
+
+            if (currentItems >= currentMax)
+            {
+                FloatingTextUI.Instance?.Show("장비를 해제할 수 없습니다.", FloatingTextUI.ColorFail);
+                Debug.Log($"[EquipmentManager] 장비 해제 불가 — 현재 아이템:{currentItems} 최대 슬롯:{currentMax}");
                 return;
             }
         }
