@@ -62,6 +62,9 @@ public class InventoryUI : MonoBehaviour
     private List<GameObject> spawnedSlots = new List<GameObject>();
     private bool             isVisible    = false;
 
+    /// <summary>가방 열림/닫힘 시 발신 — true=열림, false=닫힘</summary>
+    public event System.Action<bool> OnInventoryToggled;
+
     // ────────────────────────────────────────────────────────
     private void Awake()
     {
@@ -102,6 +105,8 @@ public class InventoryUI : MonoBehaviour
         isVisible = true;
         Refresh();
         ShowImmediate();
+        UpdateHintText();
+        OnInventoryToggled?.Invoke(true);
     }
 
     public void Hide()
@@ -109,6 +114,17 @@ public class InventoryUI : MonoBehaviour
         isVisible = false;
         HideImmediate();
         if (tooltipUI != null) tooltipUI.Hide();
+        UpdateHintText();
+        OnInventoryToggled?.Invoke(false);
+    }
+
+    private void UpdateHintText()
+    {
+        if (hintKeyText == null) return;
+        if (isVisible)
+            hintKeyText.text = "가방 닫기 [Tab]　　장비 장착/해제 [우클릭]　　아이템 버리기 [Ctrl+우클릭]";
+        else
+            hintKeyText.text = "가방 [Tab]";
     }
 
     // ────────────────────────────────────────────────────────
@@ -341,7 +357,12 @@ public class InventoryUI : MonoBehaviour
         {
             var pe = evt as PointerEventData;
             if (pe != null && pe.button == PointerEventData.InputButton.Right)
-                OnRightClick(cs, ci);
+            {
+                if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
+                    OnCtrlRightClick(cs, ci);
+                else
+                    OnRightClick(cs, ci);
+            }
         });
         trigger.triggers.Add(click);
     }
@@ -355,6 +376,14 @@ public class InventoryUI : MonoBehaviour
         tooltipUI?.Hide();
         Inventory.Instance?.RemoveAt(index);
         EquipmentManager.Instance?.Equip(equip);
+    }
+
+    private void OnCtrlRightClick(InventorySlot slot, int index)
+    {
+        if (slot == null) return;
+        tooltipUI?.Hide();
+        Inventory.Instance?.RemoveAt(index);
+        Debug.Log($"[InventoryUI] 아이템 버리기: {slot.item.itemName}");
     }
 
     // ────────────────────────────────────────────────────────
