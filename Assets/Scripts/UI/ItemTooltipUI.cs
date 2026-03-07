@@ -293,6 +293,12 @@ public class ItemTooltipUI : MonoBehaviour
         Add("피해량", e.statDamageConst);
         Add("피해%",  e.statDamagePer);
         Add("회피",   e.statBaseDodge);
+        // 소지량 — 정수 표시
+        if (e.statMaxItemSlot != 0)
+            sb.AppendLine($"소지량  {(e.statMaxItemSlot > 0 ? "+" : "")}{e.statMaxItemSlot:F0}");
+        // 무게한도 — 소수점 1자리 + kg 단위
+        if (e.statMaxCarryWeight != 0)
+            sb.AppendLine($"무게  {(e.statMaxCarryWeight > 0 ? "+" : "")}{e.statMaxCarryWeight:F1}kg");
         return sb.ToString().TrimEnd();
     }
 
