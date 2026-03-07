@@ -180,12 +180,13 @@ public class EventSession
         switch (slot)
         {
             case EquipType.Weapon:   return "무기";
-            case EquipType.Armor:    return "갑옷";
-            case EquipType.Gloves:   return "장갑";
-            case EquipType.Boots:    return "신발";
-            case EquipType.Ring:     return "반지";
+            case EquipType.Helmet:   return "투구";
             case EquipType.Necklace: return "목걸이";
+            case EquipType.Gloves:   return "장갑";
+            case EquipType.Armor:    return "갑옷";
+            case EquipType.Ring:     return "반지";
             case EquipType.Amulet:   return "장신구";
+            case EquipType.Boots:    return "신발";
             case EquipType.Bag:      return "가방";
             default:                 return slot.ToString();
         }
