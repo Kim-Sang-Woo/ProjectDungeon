@@ -595,7 +595,7 @@ public class BattleUI : MonoBehaviour
 
             bool selected = (i == selectedCardOrder);
             string title = selected ? $"[선택중] {cardData.cardName}" : cardData.cardName;
-            string desc = string.IsNullOrEmpty(cardData.description) ? "-" : cardData.description;
+            string desc = string.IsNullOrEmpty(cardData.description) ? BuildCardAutoDescription(cardData) : cardData.description;
             int cardOrder = i;
             card.Bind(title, cardData.costMana, desc, cardData.artwork, () =>
             {
@@ -847,6 +847,32 @@ public class BattleUI : MonoBehaviour
                 bg.color = colorMonsterSelected;
             else
                 bg.color = isAttackArmed ? colorMonsterTarget : colorMonsterNormal;
+        }
+    }
+
+    private string BuildCardAutoDescription(BattleCardData card)
+    {
+        if (card == null) return "-";
+
+        switch (card.effectType)
+        {
+            case BattleCardEffectType.Attack:
+                switch (card.targetType)
+                {
+                    case BattleCardTargetType.EnemyAll: return "모든 적에게 피해를 줍니다.";
+                    case BattleCardTargetType.EnemySingleAdjacent: return "대상과 인접한 적에게 피해를 줍니다.";
+                    default: return "적 1체에게 피해를 줍니다.";
+                }
+            case BattleCardEffectType.GainShield:
+                return $"방어를 {card.amount:0} 얻습니다.";
+            case BattleCardEffectType.Heal:
+                return $"체력을 {card.amount:0} 회복합니다.";
+            case BattleCardEffectType.GainDodge:
+                return $"회피를 {card.amount:0} 얻습니다.";
+            case BattleCardEffectType.GainMana:
+                return $"마나를 {card.amount:0} 얻습니다.";
+            default:
+                return "-";
         }
     }
 

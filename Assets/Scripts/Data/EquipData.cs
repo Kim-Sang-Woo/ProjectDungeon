@@ -11,6 +11,7 @@
 //   - 모든 StatType에 대해 보정치 설정 가능
 //   - 장착 시 EquipmentManager가 CharacterStats에 보정치 적용
 // ============================================================
+using System.Collections.Generic;
 using UnityEngine;
 
 [CreateAssetMenu(fileName = "Equip_New", menuName = "Dungeon/Equip Data")]
@@ -18,6 +19,10 @@ public class EquipData : ItemData
 {
     [Header("장비 타입")]
     public EquipType equipType;
+
+    [Header("전투 카드 (Deck 기여)")]
+    [Tooltip("전투 시작/라운드 드로우 시 이 장비가 덱 풀에 추가하는 카드 목록")]
+    public List<BattleCardData> battleCards = new List<BattleCardData>();
 
     [Header("장비 능력치 보정치")]
     [Tooltip("최대 체력 증가")]

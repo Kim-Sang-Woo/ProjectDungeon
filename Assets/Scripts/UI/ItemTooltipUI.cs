@@ -142,7 +142,21 @@ public class ItemTooltipUI : MonoBehaviour
             tooltipStatsText.text = hasStats ? BuildEquipStats(e) : "";
         }
 
-        if (tooltipDescText != null) tooltipDescText.text = item.description;
+        if (tooltipDescText != null)
+        {
+            EquipData e = item as EquipData;
+            if (e != null)
+            {
+                string cards = BuildEquipCardList(e);
+                tooltipDescText.text = string.IsNullOrEmpty(cards)
+                    ? item.description
+                    : $"{item.description}\n\n{cards}";
+            }
+            else
+            {
+                tooltipDescText.text = item.description;
+            }
+        }
 
         if (tooltipPriceWeightText != null)
         {
@@ -162,7 +176,13 @@ public class ItemTooltipUI : MonoBehaviour
             tooltipStatsText.text = equip.HasStats ? BuildEquipStats(equip) : "";
         }
 
-        if (tooltipDescText != null) tooltipDescText.text = equip.description;
+        if (tooltipDescText != null)
+        {
+            string cards = BuildEquipCardList(equip);
+            tooltipDescText.text = string.IsNullOrEmpty(cards)
+                ? equip.description
+                : $"{equip.description}\n\n{cards}";
+        }
         if (tooltipPriceWeightText != null)
             tooltipPriceWeightText.text = $"{equip.price}G  [{equip.weight:F1} Kg]";
     }
@@ -207,6 +227,10 @@ public class ItemTooltipUI : MonoBehaviour
             // 텍스트 줄바꿈 설정
             t.horizontalOverflow = HorizontalWrapMode.Wrap;
             t.verticalOverflow   = VerticalWrapMode.Overflow;
+
+            // 툴팁에서는 이탤릭/볼드가 섞여 들어오지 않도록 기본값 고정
+            t.fontStyle = FontStyle.Normal;
+            t.supportRichText = true;
 
             // Layout Element — 고정 Height 해제, preferred height는 텍스트가 자동 계산
             LayoutElement le = t.GetComponent<LayoutElement>()
@@ -291,6 +315,27 @@ public class ItemTooltipUI : MonoBehaviour
         if (e.statMaxCarryWeight != 0)
             sb.AppendLine($"무게  {(e.statMaxCarryWeight > 0 ? "+" : "")}{e.statMaxCarryWeight:F1}kg");
         return sb.ToString().TrimEnd();
+    }
+
+    private string BuildEquipCardList(EquipData equip)
+    {
+        if (equip == null || equip.battleCards == null || equip.battleCards.Count == 0)
+            return "";
+
+        var sb = new System.Text.StringBuilder();
+        bool first = true;
+        for (int i = 0; i < equip.battleCards.Count; i++)
+        {
+            BattleCardData card = equip.battleCards[i];
+            if (card == null) continue;
+
+            if (!first) sb.AppendLine();
+            sb.Append("<color=#9FD6FF>[")
+              .Append(card.cardName)
+              .Append("]</color>");
+            first = false;
+        }
+        return sb.ToString();
     }
 
     private string EquipTypeLabel(EquipType t)

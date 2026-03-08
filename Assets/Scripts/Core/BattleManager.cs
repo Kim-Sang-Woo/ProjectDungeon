@@ -75,10 +75,12 @@ public class BattleManager : MonoBehaviour
     public event Action<BattleState> OnBattleStateChanged;
     public event Action OnBattleStarted;
     public event Action OnBattleEnded;
+    public event Action<bool> OnBattleFinished; // true=victory, false=defeat
     public event Action OnBattleValuesChanged;
     public event Action<string> OnSfxCue; // "round_start", "enemy_turn", "victory", "defeat", "attack", "enemy_hit"
 
     private System.Random rng = new System.Random();
+    private bool battleEndRequested = false;
 
     private void Awake()
     {
@@ -104,6 +106,9 @@ public class BattleManager : MonoBehaviour
         if (movementSystem == null) movementSystem = FindFirstObjectByType<MovementSystem>();
         movementSystem?.LockInput();
 
+        if (InventoryUI.Instance != null)
+            InventoryUI.Instance.Hide();
+
         CurrentEncounter = encounter;
         BuildMonstersFromEncounter(encounter);
 
@@ -112,6 +117,7 @@ public class BattleManager : MonoBehaviour
         characterStats.currentDodge  = Mathf.Max(0f, characterStats.baseDodge.FinalValue);
         characterStats.NotifyStatsChanged();
 
+        battleEndRequested = false;
         RoundIndex = 0;
         SetState(BattleState.BattleStart);
         OnBattleStarted?.Invoke();
@@ -132,6 +138,9 @@ public class BattleManager : MonoBehaviour
 
     public void EndBattle(bool isVictory)
     {
+        if (battleEndRequested) return;
+        battleEndRequested = true;
+
         StopAllCoroutines();
         StartCoroutine(CoEndBattle(isVictory));
     }
@@ -168,6 +177,7 @@ public class BattleManager : MonoBehaviour
             Debug.Log($"[BattleManager] EndBattle: {(isVictory ? "Victory" : "Defeat")}");
 
         OnBattleEnded?.Invoke();
+        OnBattleFinished?.Invoke(isVictory);
     }
 
     /// <summary>하위 호환: 첫 번째 카드 사용 시도로 연결</summary>
@@ -392,35 +402,54 @@ public class BattleManager : MonoBehaviour
         CurrentHandCards.Clear();
 
         int drawCount = Mathf.Max(0, maxHand);
-        if (debugBattleDeck != null && debugBattleDeck.Count > 0)
+
+        // 1순위: 장착 장비 기반 덱 풀
+        List<BattleCardData> sourceDeck = BuildDeckPoolFromEquips();
+
+        // 2순위(하위호환): debugBattleDeck
+        if (sourceDeck.Count == 0 && debugBattleDeck != null && debugBattleDeck.Count > 0)
         {
-            // 랜덤 드로우 (중복 없이) — 덱 수량이 부족하면 가능한 만큼만 지급
-            List<BattleCardData> pool = new List<BattleCardData>();
             for (int i = 0; i < debugBattleDeck.Count; i++)
-            {
                 if (debugBattleDeck[i] != null)
-                    pool.Add(debugBattleDeck[i]);
-            }
-
-            int count = Mathf.Min(drawCount, pool.Count);
-            for (int i = 0; i < count; i++)
-            {
-                int pick = rng.Next(0, pool.Count);
-                BattleCardData cd = pool[pick];
-                pool.RemoveAt(pick);
-                CurrentHandCards.Add(new RuntimeBattleCard(cd));
-            }
-            return;
+                    sourceDeck.Add(debugBattleDeck[i]);
         }
 
-        // fallback: 카드 데이터가 없을 때 기존 공격 카드 1종 유지
-        if (fallbackAttackCard != null && drawCount > 0)
+        // 3순위: fallback 1장
+        if (sourceDeck.Count == 0 && fallbackAttackCard != null)
+            sourceDeck.Add(fallbackAttackCard);
+
+        if (sourceDeck.Count == 0 || drawCount <= 0) return;
+
+        // 라운드마다 덱에서 랜덤 샘플링(중복 없이), 덱 부족 시 가능한 만큼만
+        int count = Mathf.Min(drawCount, sourceDeck.Count);
+        for (int i = 0; i < count; i++)
         {
-            CurrentHandCards.Add(new RuntimeBattleCard(fallbackAttackCard));
-            return;
+            int pick = rng.Next(0, sourceDeck.Count);
+            BattleCardData cd = sourceDeck[pick];
+            sourceDeck.RemoveAt(pick);
+            CurrentHandCards.Add(new RuntimeBattleCard(cd));
+        }
+    }
+
+    private List<BattleCardData> BuildDeckPoolFromEquips()
+    {
+        List<BattleCardData> pool = new List<BattleCardData>();
+        EquipmentManager em = EquipmentManager.Instance;
+        if (em == null) return pool;
+
+        foreach (var kv in em.GetAllEquipped())
+        {
+            EquipData eq = kv.Value;
+            if (eq == null || eq.battleCards == null) continue;
+
+            for (int i = 0; i < eq.battleCards.Count; i++)
+            {
+                BattleCardData card = eq.battleCards[i];
+                if (card != null) pool.Add(card);
+            }
         }
 
-        // 카드 데이터가 없으면 빈 손패 유지
+        return pool;
     }
 
     private bool ShouldAutoEndPlayerTurn()

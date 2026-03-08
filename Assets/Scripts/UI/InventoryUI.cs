@@ -108,7 +108,9 @@ public class InventoryUI : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Tab)) Toggle();
+        if (!Input.GetKeyDown(KeyCode.Tab)) return;
+        if (IsBattleBlockingInventory()) return;
+        Toggle();
     }
 
     // ────────────────────────────────────────────────────────
@@ -116,6 +118,8 @@ public class InventoryUI : MonoBehaviour
 
     public void Show()
     {
+        if (IsBattleBlockingInventory()) return;
+
         isVisible = true;
         Refresh();
         ShowImmediate();
@@ -649,6 +653,19 @@ public class InventoryUI : MonoBehaviour
         Inventory inv = Inventory.Instance;
         if (inv != null && slotIndex < inv.CurrentItemCount) return colorFilled;
         return colorEmpty;
+    }
+
+    private bool IsBattleBlockingInventory()
+    {
+        BattleManager bm = BattleManager.Instance;
+        if (bm == null) return false;
+
+        return bm.State == BattleState.BattleStart
+            || bm.State == BattleState.RoundStart
+            || bm.State == BattleState.PlayerTurn
+            || bm.State == BattleState.EnemyTurn
+            || bm.State == BattleState.Victory
+            || bm.State == BattleState.Defeat;
     }
 
     private void EnsureDragIcon()

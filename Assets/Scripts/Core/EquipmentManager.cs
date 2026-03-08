@@ -152,6 +152,33 @@ public class EquipmentManager : MonoBehaviour
 
     // ─── 내부 ───
 
+    public void ClearAllEquipped(bool notify = true)
+    {
+        var values = new List<EquipData>(equipped.Values);
+        foreach (var e in values)
+        {
+            if (e == null) continue;
+            UnequipInternal(e);
+        }
+
+        equipped.Clear();
+        if (notify) OnEquipChanged?.Invoke();
+    }
+
+    public void ReapplyStartEquips()
+    {
+        ClearAllEquipped(false);
+
+        foreach (var entry in startEquips)
+        {
+            if (entry == null || entry.equip == null) continue;
+            equipped[entry.slot] = entry.equip;
+            ApplyStats(entry.equip, +1);
+        }
+
+        OnEquipChanged?.Invoke();
+    }
+
     private void UnequipInternal(EquipData equip)
     {
         ApplyStats(equip, -1);

@@ -193,6 +193,13 @@ public class Inventory : MonoBehaviour
 
     // ─── 무게 감속 알림 ───
 
+    public void ClearAll()
+    {
+        Slots.Clear();
+        OnInventoryChanged?.Invoke();
+        NotifyWeightChanged();
+    }
+
     private void NotifyWeightChanged()
     {
         bool isSlow = IsOverweightSlow;

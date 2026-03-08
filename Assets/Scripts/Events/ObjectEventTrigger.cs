@@ -75,7 +75,6 @@ public class ObjectEventTrigger : MonoBehaviour
             if (tile.isEventConsumed && !tile.eventSO.isRepeatable) return;
 
             tile.isEventConsumed = true;
-            movementSystem.LockInput();
             Debug.Log($"[ObjectEventTrigger] 이벤트: {tile.eventSO.eventName} ({tilePos})");
             eventPopup?.Open(tile.eventSO);
             return;
@@ -115,7 +114,6 @@ public class ObjectEventTrigger : MonoBehaviour
             return;
         }
 
-        movementSystem.LockInput();
         Debug.Log($"[ObjectEventTrigger] 오브젝트 이벤트: {obj.displayName} ({tilePos})");
 
         EventData data = obj.eventOverride;
@@ -146,7 +144,6 @@ public class ObjectEventTrigger : MonoBehaviour
             return;
         }
 
-        movementSystem.LockInput();
         Debug.Log($"[ObjectEventTrigger] 계단 ({(isDown ? "하행" : "상행")}): {obj.displayName} ({tilePos})");
 
         // eventOverride 우선 사용, null이면 팩토리 자동 생성

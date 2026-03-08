@@ -173,6 +173,13 @@ public class DungeonManager : MonoBehaviour
         GenerateAndLoadFloor(CurrentFloorIndex - 1, false);
     }
 
+    /// <summary>임시 마을 복귀: 1층 START(계단 UP) 위치로 복귀</summary>
+    public void ReturnToTownSpawn()
+    {
+        Debug.Log($"[DungeonManager] 마을 복귀(임시): {CurrentFloorIndex}층 -> 0층 START");
+        GenerateAndLoadFloor(0, true);
+    }
+
     // ─── 공용 API ───
 
     public bool IsInBounds(int x, int y) =>
