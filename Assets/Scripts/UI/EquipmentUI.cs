@@ -48,6 +48,13 @@ public class EquipmentUI : MonoBehaviour
 
     private List<GameObject> spawnedSlots = new List<GameObject>();
 
+    // 드래그 상태 (장비 -> 인벤토리)
+    private bool isDragging;
+    private EquipType dragSourceType;
+    private Image dragIconImage;
+    private RectTransform dragIconRect;
+    private Canvas rootCanvas;
+
     // ────────────────────────────────────────────────────────
     private void Awake()
     {
@@ -62,6 +69,7 @@ public class EquipmentUI : MonoBehaviour
 
         ApplyLayout();
         ApplyGridLayout();
+        rootCanvas = GetComponentInParent<Canvas>();
         Refresh();
     }
 
@@ -158,6 +166,10 @@ public class EquipmentUI : MonoBehaviour
         bg.color         = hasItem ? colorEquipped : colorEmpty;
         bg.raycastTarget = true;
 
+        EquipmentSlotView slotView = go.GetComponent<EquipmentSlotView>() ?? go.AddComponent<EquipmentSlotView>();
+        slotView.slotType = type;
+        slotView.hasItem  = hasItem;
+
         if (iconImg != null)
         {
             if (hasItem && equip.icon != null)
@@ -192,6 +204,31 @@ public class EquipmentUI : MonoBehaviour
         exitE.callback.AddListener(_ => { bg.color = colorEquipped; tooltipUI?.Hide(); });
         trigger.triggers.Add(exitE);
 
+        var beginDrag = new EventTrigger.Entry { eventID = EventTriggerType.BeginDrag };
+        beginDrag.callback.AddListener(evt =>
+        {
+            var pe = evt as PointerEventData;
+            if (pe != null && pe.button == PointerEventData.InputButton.Left)
+                BeginEquipDrag(ct, ce, pe);
+        });
+        trigger.triggers.Add(beginDrag);
+
+        var drag = new EventTrigger.Entry { eventID = EventTriggerType.Drag };
+        drag.callback.AddListener(evt =>
+        {
+            var pe = evt as PointerEventData;
+            if (pe != null) UpdateEquipDrag(pe);
+        });
+        trigger.triggers.Add(drag);
+
+        var endDrag = new EventTrigger.Entry { eventID = EventTriggerType.EndDrag };
+        endDrag.callback.AddListener(evt =>
+        {
+            var pe = evt as PointerEventData;
+            EndEquipDrag(pe);
+        });
+        trigger.triggers.Add(endDrag);
+
         var click = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
         click.callback.AddListener(evt =>
         {
@@ -200,6 +237,161 @@ public class EquipmentUI : MonoBehaviour
                 OnRightClick(ct);
         });
         trigger.triggers.Add(click);
+    }
+
+    private void BeginEquipDrag(EquipType slotType, EquipData equip, PointerEventData eventData)
+    {
+        if (equip == null) return;
+
+        isDragging = true;
+        dragSourceType = slotType;
+        tooltipUI?.Hide();
+
+        EnsureDragIcon();
+        if (dragIconImage != null)
+        {
+            dragIconImage.enabled = true;
+            dragIconImage.sprite = equip.icon;
+            dragIconImage.color = equip.icon != null ? Color.white : new Color(1f, 1f, 1f, 0.6f);
+        }
+
+        UpdateEquipDrag(eventData);
+    }
+
+    private void UpdateEquipDrag(PointerEventData eventData)
+    {
+        if (!isDragging || dragIconRect == null || rootCanvas == null) return;
+
+        RectTransform canvasRect = rootCanvas.transform as RectTransform;
+        if (canvasRect == null) return;
+
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                canvasRect,
+                eventData.position,
+                eventData.pressEventCamera,
+                out Vector2 localPos))
+        {
+            dragIconRect.anchoredPosition = localPos;
+        }
+    }
+
+    private void EndEquipDrag(PointerEventData eventData)
+    {
+        if (!isDragging) return;
+
+        TryDropEquipToInventory(eventData);
+
+        isDragging = false;
+        if (dragIconImage != null)
+        {
+            dragIconImage.enabled = false;
+            dragIconImage.sprite = null;
+        }
+    }
+
+    private void TryDropEquipToInventory(PointerEventData eventData)
+    {
+        Inventory inv = Inventory.Instance;
+        EquipmentManager em = EquipmentManager.Instance;
+        if (inv == null || em == null || eventData == null) return;
+
+        EquipData draggedEquip = em.GetEquipped(dragSourceType);
+        if (draggedEquip == null) return;
+
+        int targetIndex = GetInventoryDropIndex(eventData);
+        if (targetIndex < 0) return;
+
+        bool targetHasItem = targetIndex < inv.CurrentItemCount;
+        if (!targetHasItem)
+        {
+            em.Unequip(dragSourceType);
+            return;
+        }
+
+        InventorySlot targetSlot = inv.Slots[targetIndex];
+        EquipData targetEquip = targetSlot?.item as EquipData;
+
+        // 같은 타입 장비 아이템 위에 드롭하면 교체
+        if (targetEquip != null && targetEquip.equipType == dragSourceType)
+        {
+            inv.RemoveAt(targetIndex);
+
+            em.Unequip(dragSourceType);
+            if (em.GetEquipped(dragSourceType) != null)
+            {
+                // 해제 실패 시 최소 롤백 시도
+                inv.AddItem(targetEquip, 1);
+                return;
+            }
+
+            em.Equip(targetEquip);
+
+            int movedIndex = inv.CurrentItemCount - 1;
+            if (movedIndex >= 0)
+                inv.MoveSlot(movedIndex, targetIndex);
+            return;
+        }
+
+        // 다른 타입 아이템 위에 드롭: 대상은 유지, 장비는 빈칸으로 해제 시도
+        em.Unequip(dragSourceType);
+    }
+
+    private int GetInventoryDropIndex(PointerEventData eventData)
+    {
+        InventoryUI invUI = InventoryUI.Instance;
+        Inventory inv = Inventory.Instance;
+        if (invUI == null || inv == null || invUI.itemGrid == null) return -1;
+
+        RectTransform gridRT = invUI.itemGrid as RectTransform;
+        if (gridRT == null) return -1;
+
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                gridRT,
+                eventData.position,
+                eventData.pressEventCamera,
+                out Vector2 local))
+        {
+            float width = gridRT.rect.width;
+            float ox = local.x + width * 0.5f;
+            float oy = -local.y;
+
+            float pitchX = invUI.slotSize + invUI.slotSpacing;
+            float pitchY = invUI.slotSize + invUI.slotSpacing;
+
+            int col = Mathf.FloorToInt(ox / pitchX);
+            int row = Mathf.FloorToInt(oy / pitchY);
+
+            int maxRows = Mathf.CeilToInt(40f / 4f); // InventoryUI 고정 4x10
+            int openSlots = Mathf.Min(inv.MaxItemCount, 40);
+
+            if (col >= 0 && col < 4 && row >= 0 && row < maxRows)
+            {
+                int index = row * 4 + col;
+                if (index >= 0 && index < openSlots)
+                    return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private void EnsureDragIcon()
+    {
+        if (dragIconImage != null) return;
+
+        if (rootCanvas == null) rootCanvas = GetComponentInParent<Canvas>();
+        if (rootCanvas == null) return;
+
+        GameObject go = new GameObject("DraggedEquipIcon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        go.transform.SetParent(rootCanvas.transform, false);
+
+        dragIconRect = go.GetComponent<RectTransform>();
+        dragIconRect.sizeDelta = new Vector2(slotSize, slotSize);
+
+        dragIconImage = go.GetComponent<Image>();
+        dragIconImage.raycastTarget = false;
+        dragIconImage.preserveAspect = true;
+        dragIconImage.enabled = false;
     }
 
     private void OnRightClick(EquipType slotType)

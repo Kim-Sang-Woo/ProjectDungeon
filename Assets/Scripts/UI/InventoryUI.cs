@@ -500,12 +500,17 @@ public class InventoryUI : MonoBehaviour
     {
         if (!isDragging) return;
 
-        // 마지막 드래그 프레임에서 계산된 타겟 우선 사용
-        int targetIndex = dragTargetIndex >= 0 ? dragTargetIndex : GetDropTargetIndex(eventData);
+        bool handled = TryDropToEquipSlot(eventData);
 
-        if (targetIndex >= 0)
+        if (!handled)
         {
-            Inventory.Instance?.MoveSlot(dragSourceIndex, targetIndex);
+            // 마지막 드래그 프레임에서 계산된 타겟 우선 사용
+            int targetIndex = dragTargetIndex >= 0 ? dragTargetIndex : GetDropTargetIndex(eventData);
+
+            if (targetIndex >= 0)
+            {
+                Inventory.Instance?.MoveSlot(dragSourceIndex, targetIndex);
+            }
         }
 
         isDragging      = false;
@@ -517,6 +522,39 @@ public class InventoryUI : MonoBehaviour
             dragIconImage.enabled = false;
             dragIconImage.sprite  = null;
         }
+    }
+
+    private bool TryDropToEquipSlot(PointerEventData eventData)
+    {
+        if (eventData == null) return false;
+        Inventory inv = Inventory.Instance;
+        if (inv == null || dragSourceIndex < 0 || dragSourceIndex >= inv.CurrentItemCount) return false;
+
+        InventorySlot srcSlot = inv.Slots[dragSourceIndex];
+        EquipData dragEquip = srcSlot?.item as EquipData;
+        if (dragEquip == null) return false;
+
+        List<RaycastResult> results = new List<RaycastResult>();
+        EventSystem.current?.RaycastAll(eventData, results);
+
+        foreach (var r in results)
+        {
+            if (r.gameObject == null) continue;
+            EquipmentSlotView equipView = r.gameObject.GetComponentInParent<EquipmentSlotView>();
+            if (equipView == null) continue;
+
+            if (dragEquip.equipType != equipView.slotType)
+            {
+                // 타입이 다른 장비 슬롯에는 장착하지 않음
+                return true;
+            }
+
+            inv.RemoveAt(dragSourceIndex);
+            EquipmentManager.Instance?.Equip(dragEquip);
+            return true;
+        }
+
+        return false;
     }
 
     private int GetDropTargetIndex(PointerEventData eventData)

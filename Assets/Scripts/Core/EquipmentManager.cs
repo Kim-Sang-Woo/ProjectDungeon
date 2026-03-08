@@ -111,7 +111,7 @@ public class EquipmentManager : MonoBehaviour
 
             if (currentItems >= currentMax)
             {
-                FloatingTextUI.Instance?.Show("장비를 해제할 수 없습니다.", FloatingTextUI.ColorFail);
+                FloatingTextUI.Instance?.Show("인벤토리가 가득 찼습니다.", FloatingTextUI.ColorFail);
                 Debug.Log($"[EquipmentManager] 장비 해제 불가 — 현재 아이템:{currentItems} 최대 슬롯:{currentMax}");
                 return;
             }
