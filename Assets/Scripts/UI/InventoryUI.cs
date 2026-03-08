@@ -50,7 +50,8 @@ public class InventoryUI : MonoBehaviour
     public Color colorEmpty  = new Color(0.055f, 0.047f, 0.035f, 1f);
     public Color colorFilled = new Color(0.094f, 0.078f, 0.063f, 1f);
     public Color colorHover  = new Color(0.157f, 0.125f, 0.063f, 1f);
-    public Color colorLocked   = new Color(0.035f, 0.031f, 0.027f, 1f);
+    public Color colorLocked = new Color(0.035f, 0.031f, 0.027f, 1f);
+    public Color colorDragTarget = new Color(0.25f, 0.36f, 0.15f, 1f);
 
     [Header("연동")]
     public EquipmentUI   equipmentUI;
@@ -60,7 +61,16 @@ public class InventoryUI : MonoBehaviour
     private const int MAX_SLOTS    = 40; // 4×10
 
     private List<GameObject> spawnedSlots = new List<GameObject>();
+    private Dictionary<int, Image> slotBackgroundByIndex = new Dictionary<int, Image>();
     private bool             isVisible    = false;
+
+    // 드래그 정렬 상태
+    private bool           isDragging;
+    private int            dragSourceIndex = -1;
+    private int            dragTargetIndex = -1;
+    private Image          dragIconImage;
+    private RectTransform  dragIconRect;
+    private Canvas         rootCanvas;
 
     /// <summary>가방 열림/닫힘 시 발신 — true=열림, false=닫힘</summary>
     public event System.Action<bool> OnInventoryToggled;
@@ -82,6 +92,8 @@ public class InventoryUI : MonoBehaviour
 
         ApplyPanelLayout();
         ApplyGridLayout();
+
+        rootCanvas = GetComponentInParent<Canvas>();
     }
 
     private void OnDestroy()
@@ -112,8 +124,18 @@ public class InventoryUI : MonoBehaviour
     public void Hide()
     {
         isVisible = false;
+        isDragging = false;
+        dragSourceIndex = -1;
+        ClearDragTargetHighlight();
+
         HideImmediate();
         if (tooltipUI != null) tooltipUI.Hide();
+        if (dragIconImage != null)
+        {
+            dragIconImage.enabled = false;
+            dragIconImage.sprite = null;
+        }
+
         UpdateHintText();
         OnInventoryToggled?.Invoke(false);
     }
@@ -277,6 +299,8 @@ public class InventoryUI : MonoBehaviour
         foreach (var go in spawnedSlots)
             if (go != null) Destroy(go);
         spawnedSlots.Clear();
+        slotBackgroundByIndex.Clear();
+        dragTargetIndex = -1;
 
         if (itemGrid == null || itemSlotPrefab == null) return;
 
@@ -308,6 +332,12 @@ public class InventoryUI : MonoBehaviour
         Text  nameText = FindChildText(go, "Name")     ?? FindChildTextByIndex(go, 1);
 
         bg.raycastTarget = true;
+        slotBackgroundByIndex[index] = bg;
+
+        InventorySlotView slotView = go.GetComponent<InventorySlotView>() ?? go.AddComponent<InventorySlotView>();
+        slotView.slotIndex = index;
+        slotView.hasItem   = slot != null;
+        slotView.isOpen    = isOpen;
 
         if (slot == null)
         {
@@ -345,12 +375,51 @@ public class InventoryUI : MonoBehaviour
         trigger.triggers.Clear();
 
         var enter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
-        enter.callback.AddListener(_ => { bg.color = colorHover; tooltipUI?.ShowForSlot(cs, rt); });
+        enter.callback.AddListener(_ =>
+        {
+            if (!isDragging)
+            {
+                bg.color = colorHover;
+                tooltipUI?.ShowForSlot(cs, rt);
+            }
+        });
         trigger.triggers.Add(enter);
 
         var exitE = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
-        exitE.callback.AddListener(_ => { bg.color = colorFilled; tooltipUI?.Hide(); });
+        exitE.callback.AddListener(_ =>
+        {
+            if (!isDragging)
+            {
+                bg.color = colorFilled;
+                tooltipUI?.Hide();
+            }
+        });
         trigger.triggers.Add(exitE);
+
+        var beginDrag = new EventTrigger.Entry { eventID = EventTriggerType.BeginDrag };
+        beginDrag.callback.AddListener(evt =>
+        {
+            var pe = evt as PointerEventData;
+            if (pe != null && pe.button == PointerEventData.InputButton.Left)
+                BeginItemDrag(ci, cs, pe);
+        });
+        trigger.triggers.Add(beginDrag);
+
+        var drag = new EventTrigger.Entry { eventID = EventTriggerType.Drag };
+        drag.callback.AddListener(evt =>
+        {
+            var pe = evt as PointerEventData;
+            if (pe != null) UpdateItemDrag(pe);
+        });
+        trigger.triggers.Add(drag);
+
+        var endDrag = new EventTrigger.Entry { eventID = EventTriggerType.EndDrag };
+        endDrag.callback.AddListener(evt =>
+        {
+            var pe = evt as PointerEventData;
+            EndItemDrag(pe);
+        });
+        trigger.triggers.Add(endDrag);
 
         var click = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
         click.callback.AddListener(evt =>
@@ -384,6 +453,181 @@ public class InventoryUI : MonoBehaviour
         tooltipUI?.Hide();
         Inventory.Instance?.RemoveAt(index);
         Debug.Log($"[InventoryUI] 아이템 버리기: {slot.item.itemName}");
+    }
+
+    private void BeginItemDrag(int slotIndex, InventorySlot slot, PointerEventData eventData)
+    {
+        if (slot == null || slot.item == null) return;
+
+        isDragging      = true;
+        dragSourceIndex = slotIndex;
+        dragTargetIndex = -1;
+        tooltipUI?.Hide();
+
+        EnsureDragIcon();
+        if (dragIconImage != null)
+        {
+            dragIconImage.enabled = true;
+            dragIconImage.sprite  = slot.item.icon;
+            dragIconImage.color   = slot.item.icon != null ? Color.white : new Color(1f, 1f, 1f, 0.6f);
+        }
+
+        UpdateItemDrag(eventData);
+    }
+
+    private void UpdateItemDrag(PointerEventData eventData)
+    {
+        if (!isDragging || dragIconRect == null || rootCanvas == null) return;
+
+        RectTransform canvasRect = rootCanvas.transform as RectTransform;
+        if (canvasRect == null) return;
+
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                canvasRect,
+                eventData.position,
+                eventData.pressEventCamera,
+                out Vector2 localPos))
+        {
+            dragIconRect.anchoredPosition = localPos;
+        }
+
+        UpdateDragTargetHighlight(eventData);
+    }
+
+    private void EndItemDrag(PointerEventData eventData)
+    {
+        if (!isDragging) return;
+
+        // 마지막 드래그 프레임에서 계산된 타겟 우선 사용
+        int targetIndex = dragTargetIndex >= 0 ? dragTargetIndex : GetDropTargetIndex(eventData);
+
+        if (targetIndex >= 0)
+        {
+            Inventory.Instance?.MoveSlot(dragSourceIndex, targetIndex);
+        }
+
+        isDragging      = false;
+        dragSourceIndex = -1;
+        ClearDragTargetHighlight();
+
+        if (dragIconImage != null)
+        {
+            dragIconImage.enabled = false;
+            dragIconImage.sprite  = null;
+        }
+    }
+
+    private int GetDropTargetIndex(PointerEventData eventData)
+    {
+        if (eventData == null || itemGrid == null) return -1;
+
+        // 1) 우선 Grid 좌표 기반으로 인덱스 계산 (좌↔우 드래그 오차 방지)
+        RectTransform gridRT = itemGrid as RectTransform;
+        if (gridRT != null)
+        {
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    gridRT,
+                    eventData.position,
+                    eventData.pressEventCamera,
+                    out Vector2 local))
+            {
+                float width = gridRT.rect.width;
+                float height = gridRT.rect.height;
+
+                // pivot(0.5, 1) 기준 local -> 좌상단 원점 좌표로 변환
+                float ox = local.x + width * 0.5f;
+                float oy = -local.y;
+
+                float pitchX = slotSize + slotSpacing;
+                float pitchY = slotSize + slotSpacing;
+
+                int col = Mathf.FloorToInt(ox / pitchX);
+                int row = Mathf.FloorToInt(oy / pitchY);
+
+                int openSlots = Inventory.Instance != null ? Mathf.Min(Inventory.Instance.MaxItemCount, MAX_SLOTS) : 0;
+                int maxRows = Mathf.CeilToInt((float)MAX_SLOTS / GRID_COLUMNS);
+
+                if (col >= 0 && col < GRID_COLUMNS && row >= 0 && row < maxRows)
+                {
+                    int index = row * GRID_COLUMNS + col;
+                    if (index >= 0 && index < openSlots)
+                        return index;
+                }
+            }
+        }
+
+        // 2) 보조: 레이캐스트 결과 기반
+        if (eventData.pointerCurrentRaycast.gameObject != null)
+        {
+            InventorySlotView currentView =
+                eventData.pointerCurrentRaycast.gameObject.GetComponentInParent<InventorySlotView>();
+            if (currentView != null && currentView.isOpen)
+                return currentView.slotIndex;
+        }
+
+        List<RaycastResult> results = new List<RaycastResult>();
+        EventSystem.current?.RaycastAll(eventData, results);
+
+        foreach (var r in results)
+        {
+            if (r.gameObject == null) continue;
+            InventorySlotView view = r.gameObject.GetComponentInParent<InventorySlotView>();
+            if (view != null && view.isOpen)
+                return view.slotIndex;
+        }
+
+        return -1;
+    }
+
+    private void UpdateDragTargetHighlight(PointerEventData eventData)
+    {
+        int candidate = GetDropTargetIndex(eventData);
+        if (candidate == dragSourceIndex) candidate = -1;
+
+        if (candidate == dragTargetIndex) return;
+
+        ClearDragTargetHighlight();
+
+        dragTargetIndex = candidate;
+        if (dragTargetIndex >= 0 && slotBackgroundByIndex.TryGetValue(dragTargetIndex, out Image bg) && bg != null)
+        {
+            bg.color = colorDragTarget;
+        }
+    }
+
+    private void ClearDragTargetHighlight()
+    {
+        if (dragTargetIndex >= 0 && slotBackgroundByIndex.TryGetValue(dragTargetIndex, out Image oldBg) && oldBg != null)
+        {
+            oldBg.color = GetSlotBaseColor(dragTargetIndex);
+        }
+        dragTargetIndex = -1;
+    }
+
+    private Color GetSlotBaseColor(int slotIndex)
+    {
+        Inventory inv = Inventory.Instance;
+        if (inv != null && slotIndex < inv.CurrentItemCount) return colorFilled;
+        return colorEmpty;
+    }
+
+    private void EnsureDragIcon()
+    {
+        if (dragIconImage != null) return;
+
+        if (rootCanvas == null) rootCanvas = GetComponentInParent<Canvas>();
+        if (rootCanvas == null) return;
+
+        GameObject go = new GameObject("DraggedItemIcon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        go.transform.SetParent(rootCanvas.transform, false);
+
+        dragIconRect = go.GetComponent<RectTransform>();
+        dragIconRect.sizeDelta = new Vector2(slotSize, slotSize);
+
+        dragIconImage = go.GetComponent<Image>();
+        dragIconImage.raycastTarget = false;
+        dragIconImage.preserveAspect = true;
+        dragIconImage.enabled = false;
     }
 
     // ────────────────────────────────────────────────────────

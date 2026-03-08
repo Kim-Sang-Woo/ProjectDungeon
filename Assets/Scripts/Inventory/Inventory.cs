@@ -153,6 +153,44 @@ public class Inventory : MonoBehaviour
         NotifyWeightChanged();
     }
 
+    /// <summary>
+    /// 슬롯 위치 변경 (드래그 정렬용)
+    /// - 대상이 아이템 슬롯이면 서로 스왑
+    /// - 대상이 빈 슬롯이면 아이템을 맨 뒤(가장 마지막 위치)로 이동
+    /// </summary>
+    public void MoveSlot(int fromIndex, int toIndex)
+    {
+        if (Slots == null || Slots.Count == 0) return;
+        if (fromIndex < 0 || fromIndex >= Slots.Count) return;
+
+        // UI 기준 open slot index를 받으므로 MaxItemCount 범위로 제한
+        toIndex = Mathf.Clamp(toIndex, 0, Mathf.Max(0, MaxItemCount - 1));
+        if (fromIndex == toIndex) return;
+
+        // 대상 슬롯에 아이템이 있으면 "스왑"
+        if (toIndex < Slots.Count)
+        {
+            InventorySlot temp = Slots[fromIndex];
+            Slots[fromIndex] = Slots[toIndex];
+            Slots[toIndex] = temp;
+
+            Debug.Log($"[Inventory] 슬롯 스왑: {fromIndex} <-> {toIndex}");
+            OnInventoryChanged?.Invoke();
+            return;
+        }
+
+        // 대상 슬롯이 비어 있으면 끝으로 이동(현재 구조상 빈 슬롯은 뒤쪽 연속 구간)
+        int lastIndex = Slots.Count - 1;
+        if (fromIndex == lastIndex) return;
+
+        InventorySlot moving = Slots[fromIndex];
+        Slots.RemoveAt(fromIndex);
+        Slots.Add(moving);
+
+        Debug.Log($"[Inventory] 빈 슬롯으로 이동: {fromIndex} -> {Slots.Count - 1}");
+        OnInventoryChanged?.Invoke();
+    }
+
     // ─── 무게 감속 알림 ───
 
     private void NotifyWeightChanged()
