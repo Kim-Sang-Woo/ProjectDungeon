@@ -29,6 +29,17 @@ public class RuntimeMonster
     public bool IsDead => currentHP <= 0;
 }
 
+[Serializable]
+public class RuntimeBattleCard
+{
+    public BattleCardData data;
+
+    public RuntimeBattleCard(BattleCardData data)
+    {
+        this.data = data;
+    }
+}
+
 public class BattleManager : MonoBehaviour
 {
     public static BattleManager Instance { get; private set; }
@@ -43,6 +54,10 @@ public class BattleManager : MonoBehaviour
     [Header("초기 전투 설정")]
     [Min(0)] public int defaultAttackCostMana = 1;
 
+    [Header("전투 카드 설정")]
+    public BattleCardData fallbackAttackCard;
+    public List<BattleCardData> debugBattleDeck = new List<BattleCardData>();
+
     [Header("종료 연출")]
     [Min(0f)] public float endStateDuration = 1.2f;
 
@@ -52,13 +67,16 @@ public class BattleManager : MonoBehaviour
 
     public int RoundIndex { get; private set; } = 0;
     public int CurrentMana { get; private set; } = 0;
-    public int CurrentHandCount { get; private set; } = 0; // 초기 개발: 디폴트 공격 카드 수량으로 사용
+    public int CurrentHandCount => CurrentHandCards.Count;
     public int PredictedEnemyDamage { get; private set; } = 0; // 다음 적 턴 예상 합산 피해
+
+    public List<RuntimeBattleCard> CurrentHandCards { get; private set; } = new List<RuntimeBattleCard>();
 
     public event Action<BattleState> OnBattleStateChanged;
     public event Action OnBattleStarted;
     public event Action OnBattleEnded;
     public event Action OnBattleValuesChanged;
+    public event Action<string> OnSfxCue; // "round_start", "enemy_turn", "victory", "defeat", "attack", "enemy_hit"
 
     private System.Random rng = new System.Random();
 
@@ -88,6 +106,11 @@ public class BattleManager : MonoBehaviour
 
         CurrentEncounter = encounter;
         BuildMonstersFromEncounter(encounter);
+
+        // 전투 시작 시 기본 방어/회피를 현재값에 반영 (장비 보정 포함 FinalValue 사용)
+        characterStats.currentShield = Mathf.Max(0f, characterStats.baseShield.FinalValue);
+        characterStats.currentDodge  = Mathf.Max(0f, characterStats.baseDodge.FinalValue);
+        characterStats.NotifyStatsChanged();
 
         RoundIndex = 0;
         SetState(BattleState.BattleStart);
@@ -121,9 +144,15 @@ public class BattleManager : MonoBehaviour
             OpenVictoryRewards();
 
         if (!isVictory)
+        {
             FloatingTextUI.Instance?.Show("전투 패배", FloatingTextUI.ColorFail);
+            OnSfxCue?.Invoke("defeat");
+        }
         else
+        {
             FloatingTextUI.Instance?.Show("전투 승리", FloatingTextUI.ColorAcquire);
+            OnSfxCue?.Invoke("victory");
+        }
 
         if (endStateDuration > 0f)
             yield return new WaitForSeconds(endStateDuration);
@@ -141,29 +170,107 @@ public class BattleManager : MonoBehaviour
         OnBattleEnded?.Invoke();
     }
 
-    /// <summary>디폴트 공격 카드 사용 (초기 개발용)</summary>
+    /// <summary>하위 호환: 첫 번째 카드 사용 시도로 연결</summary>
     public bool TryUseDefaultAttack(int targetIndex)
     {
+        return TryUseCard(0, targetIndex);
+    }
+
+    public bool TryUseCard(int cardOrder, int targetIndex = -1)
+    {
         if (State != BattleState.PlayerTurn) return false;
-        if (targetIndex < 0 || targetIndex >= Monsters.Count) return false;
+        if (cardOrder < 0 || cardOrder >= CurrentHandCards.Count) return false;
 
-        RuntimeMonster target = Monsters[targetIndex];
-        if (target == null || target.IsDead) return false;
+        RuntimeBattleCard runtimeCard = CurrentHandCards[cardOrder];
+        BattleCardData card = runtimeCard?.data;
+        if (card == null) return false;
 
-        if (CurrentHandCount <= 0 || CurrentMana < defaultAttackCostMana)
+        if (CurrentMana < card.costMana)
             return false;
 
-        float dmgConst = characterStats != null ? characterStats.damageConst.FinalValue : 0f;
-        float dmgPer   = characterStats != null ? characterStats.damagePer.FinalValue : 0f;
-        int damage = BattleMath.CalcFinalDamage(dmgConst, dmgPer);
+        bool consumed = false;
 
-        target.currentHP = Mathf.Max(0, target.currentHP - damage);
-        CurrentMana -= defaultAttackCostMana;
-        CurrentHandCount = Mathf.Max(0, CurrentHandCount - 1);
+        switch (card.effectType)
+        {
+            case BattleCardEffectType.Attack:
+            {
+                int damage = CalcCardAttackDamage(card);
+                bool hitAny = false;
+
+                if (card.targetType == BattleCardTargetType.EnemyAll)
+                {
+                    foreach (var m in Monsters)
+                    {
+                        if (m == null || m.IsDead) continue;
+                        ApplyDamageToMonster(m, damage);
+                        hitAny = true;
+                    }
+                }
+                else if (card.targetType == BattleCardTargetType.EnemySingleAdjacent)
+                {
+                    if (targetIndex < 0 || targetIndex >= Monsters.Count) return false;
+                    for (int i = targetIndex - 1; i <= targetIndex + 1; i++)
+                    {
+                        if (i < 0 || i >= Monsters.Count) continue;
+                        RuntimeMonster m = Monsters[i];
+                        if (m == null || m.IsDead) continue;
+                        ApplyDamageToMonster(m, damage);
+                        hitAny = true;
+                    }
+                }
+                else // EnemySingle 기본
+                {
+                    if (targetIndex < 0 || targetIndex >= Monsters.Count) return false;
+                    RuntimeMonster target = Monsters[targetIndex];
+                    if (target == null || target.IsDead) return false;
+                    ApplyDamageToMonster(target, damage);
+                    hitAny = true;
+
+                    if (debugLog)
+                        Debug.Log($"[BattleManager] [PlayerTurn] 카드사용({card.cardName}) -> {target.data?.monsterName} / dmg={damage} / mana={CurrentMana - card.costMana}");
+                }
+
+                if (!hitAny) return false;
+                OnSfxCue?.Invoke("attack");
+                OnSfxCue?.Invoke("enemy_hit");
+                consumed = true;
+                break;
+            }
+            case BattleCardEffectType.GainShield:
+            {
+                if (characterStats == null) return false;
+                characterStats.AddShield(card.amount);
+                consumed = true;
+                break;
+            }
+            case BattleCardEffectType.Heal:
+            {
+                if (characterStats == null) return false;
+                characterStats.Heal(card.amount);
+                consumed = true;
+                break;
+            }
+            case BattleCardEffectType.GainDodge:
+            {
+                if (characterStats == null) return false;
+                characterStats.AddDodge(card.amount);
+                consumed = true;
+                break;
+            }
+            case BattleCardEffectType.GainMana:
+            {
+                CurrentMana += Mathf.FloorToInt(card.amount);
+                consumed = true;
+                break;
+            }
+        }
+
+        if (!consumed) return false;
+
+        CurrentMana -= card.costMana;
+        CurrentMana = Mathf.Max(0, CurrentMana);
+        CurrentHandCards.RemoveAt(cardOrder);
         OnBattleValuesChanged?.Invoke();
-
-        if (debugLog)
-            Debug.Log($"[BattleManager] [PlayerTurn] 기본공격 -> {target.data?.monsterName} / dmg={damage} / hp={target.currentHP} / mana={CurrentMana} hand={CurrentHandCount}");
 
         RecalculateEnemyIntent();
 
@@ -190,6 +297,7 @@ public class BattleManager : MonoBehaviour
         if (State != BattleState.PlayerTurn) return;
         SetState(BattleState.EnemyTurn);
         FloatingTextUI.Instance?.Show("적 턴", FloatingTextUI.ColorWarning);
+        OnSfxCue?.Invoke("enemy_turn");
 
         ExecuteEnemyTurn();
 
@@ -223,21 +331,39 @@ public class BattleManager : MonoBehaviour
                 characterStats.Heal(characterStats.hpGen.FinalValue);
 
             CurrentMana = Mathf.FloorToInt(characterStats.baseMana.FinalValue);
-            CurrentHandCount = Mathf.FloorToInt(characterStats.maxHand.FinalValue);
+            BuildRoundHand(Mathf.FloorToInt(characterStats.maxHand.FinalValue));
         }
         else
         {
             CurrentMana = 0;
-            CurrentHandCount = 0;
+            CurrentHandCards.Clear();
         }
 
         RecalculateEnemyIntent();
         OnBattleValuesChanged?.Invoke();
         SetState(BattleState.PlayerTurn);
         FloatingTextUI.Instance?.Show($"라운드 {RoundIndex}", FloatingTextUI.ColorAcquire);
+        OnSfxCue?.Invoke("round_start");
 
         if (debugLog)
             Debug.Log($"[BattleManager] [RoundStart] R{RoundIndex} / mana={CurrentMana} hand={CurrentHandCount} / predictedEnemy={PredictedEnemyDamage}");
+    }
+
+    private int CalcCardAttackDamage(BattleCardData card)
+    {
+        float dmgConst = characterStats != null ? characterStats.damageConst.FinalValue : 0f;
+        float dmgPer = characterStats != null ? characterStats.damagePer.FinalValue : 0f;
+        int baseDamage = BattleMath.CalcFinalDamage(dmgConst, dmgPer);
+
+        float scaled = baseDamage * Mathf.Max(0f, card != null ? card.attackMultiplier : 1f);
+        float plus = card != null ? card.amount : 0f;
+        return Mathf.Max(0, Mathf.FloorToInt(scaled + plus));
+    }
+
+    private void ApplyDamageToMonster(RuntimeMonster monster, int damage)
+    {
+        if (monster == null || monster.IsDead) return;
+        monster.currentHP = Mathf.Max(0, monster.currentHP - Mathf.Max(0, damage));
     }
 
     private void ExecuteEnemyTurn()
@@ -261,6 +387,42 @@ public class BattleManager : MonoBehaviour
         OnBattleValuesChanged?.Invoke();
     }
 
+    private void BuildRoundHand(int maxHand)
+    {
+        CurrentHandCards.Clear();
+
+        int drawCount = Mathf.Max(0, maxHand);
+        if (debugBattleDeck != null && debugBattleDeck.Count > 0)
+        {
+            // 랜덤 드로우 (중복 없이) — 덱 수량이 부족하면 가능한 만큼만 지급
+            List<BattleCardData> pool = new List<BattleCardData>();
+            for (int i = 0; i < debugBattleDeck.Count; i++)
+            {
+                if (debugBattleDeck[i] != null)
+                    pool.Add(debugBattleDeck[i]);
+            }
+
+            int count = Mathf.Min(drawCount, pool.Count);
+            for (int i = 0; i < count; i++)
+            {
+                int pick = rng.Next(0, pool.Count);
+                BattleCardData cd = pool[pick];
+                pool.RemoveAt(pick);
+                CurrentHandCards.Add(new RuntimeBattleCard(cd));
+            }
+            return;
+        }
+
+        // fallback: 카드 데이터가 없을 때 기존 공격 카드 1종 유지
+        if (fallbackAttackCard != null && drawCount > 0)
+        {
+            CurrentHandCards.Add(new RuntimeBattleCard(fallbackAttackCard));
+            return;
+        }
+
+        // 카드 데이터가 없으면 빈 손패 유지
+    }
+
     private bool ShouldAutoEndPlayerTurn()
     {
         if (CurrentMana <= 0)
@@ -275,7 +437,19 @@ public class BattleManager : MonoBehaviour
             return true;
         }
 
-        if (CurrentMana < defaultAttackCostMana)
+        bool hasUsable = false;
+        for (int i = 0; i < CurrentHandCards.Count; i++)
+        {
+            BattleCardData card = CurrentHandCards[i]?.data;
+            if (card == null) continue;
+            if (card.costMana <= CurrentMana)
+            {
+                hasUsable = true;
+                break;
+            }
+        }
+
+        if (!hasUsable)
         {
             if (debugLog) Debug.Log("[BattleManager] [PlayerTurn] 자동 턴 종료: 사용 가능한 카드 없음(코스트 부족)");
             return true;

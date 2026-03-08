@@ -47,14 +47,19 @@ public class BattleUI : MonoBehaviour
 
     private Button endTurnButton;
     private bool isAttackArmed;
+    private int selectedCardOrder = -1;
 
     private Text leftStatsText;
     private Text rightStatsText;
     private Text resultBannerText;
+    private Text handHintText;
+
+    private float prevPlayerHP = -1f;
 
     private readonly List<GameObject> spawnedMonsterButtons = new List<GameObject>();
     private readonly Dictionary<int, Image> monsterButtonBgByIndex = new Dictionary<int, Image>();
     private readonly Dictionary<int, RectTransform> monsterRootByIndex = new Dictionary<int, RectTransform>();
+    private readonly HashSet<int> flashingMonsterIndices = new HashSet<int>();
     private readonly List<BattleCardItemUI> spawnedCards = new List<BattleCardItemUI>();
 
     private int selectedTargetIndex = -1;
@@ -85,13 +90,93 @@ public class BattleUI : MonoBehaviour
 
     private void Update()
     {
-        if (!isAttackArmed) return;
+        BattleManager bm = BattleManager.Instance;
+
+        if (bm != null && bm.State == BattleState.PlayerTurn && Input.GetKeyDown(KeyCode.Space))
+        {
+            bm.EndPlayerTurnByButton();
+            return;
+        }
 
         if (Input.GetKeyDown(KeyCode.Escape) || Input.GetMouseButtonDown(1))
         {
             isAttackArmed = false;
+            selectedCardOrder = -1;
             selectedTargetIndex = -1;
             RefreshTexts();
+            return;
+        }
+
+        // 숫자 단축키: 1~0
+        KeyCode[] keys =
+        {
+            KeyCode.Alpha1, KeyCode.Alpha2, KeyCode.Alpha3, KeyCode.Alpha4, KeyCode.Alpha5,
+            KeyCode.Alpha6, KeyCode.Alpha7, KeyCode.Alpha8, KeyCode.Alpha9, KeyCode.Alpha0,
+        };
+
+        // 카드 미선택 상태: 1~0으로 카드 선택
+        if (!isAttackArmed)
+        {
+            for (int i = 0; i < keys.Length; i++)
+            {
+                if (!Input.GetKeyDown(keys[i])) continue;
+                if (i < 0 || i >= spawnedCards.Count) return;
+
+                selectedCardOrder = i;
+
+                RuntimeBattleCard runtime = (bm != null && i < bm.CurrentHandCards.Count) ? bm.CurrentHandCards[i] : null;
+                BattleCardData cardData = runtime != null ? runtime.data : null;
+
+                if (cardData != null && RequiresEnemyTarget(cardData))
+                {
+                    isAttackArmed = true;
+                    RefreshTexts();
+                    return;
+                }
+
+                bool used = bm != null && bm.TryUseCard(i, -1);
+                if (used)
+                {
+                    isAttackArmed = false;
+                    selectedCardOrder = -1;
+                    selectedTargetIndex = -1;
+                }
+                RefreshTexts();
+                return;
+            }
+
+            return;
+        }
+
+        // 카드 선택 상태: 1~0으로 몬스터 타겟 선택
+        for (int i = 0; i < keys.Length; i++)
+        {
+            if (!Input.GetKeyDown(keys[i])) continue;
+
+            int targetIndex = GetAliveMonsterIndexByOrder(i);
+            if (targetIndex < 0) return;
+
+            int cardOrder = selectedCardOrder >= 0 ? selectedCardOrder : 0;
+            RuntimeBattleCard runtime = (bm != null && cardOrder < bm.CurrentHandCards.Count) ? bm.CurrentHandCards[cardOrder] : null;
+            BattleCardData cardData = runtime != null ? runtime.data : null;
+
+            CharacterStats stats = bm != null ? (bm.characterStats != null ? bm.characterStats : CharacterStats.Instance) : CharacterStats.Instance;
+            int predictedHit = stats != null
+                ? BattleMath.CalcFinalDamage(stats.damageConst.FinalValue, stats.damagePer.FinalValue)
+                : 0;
+            if (cardData != null)
+                predictedHit = Mathf.FloorToInt(predictedHit * Mathf.Max(0f, cardData.attackMultiplier) + cardData.amount);
+
+            bool used = bm != null && bm.TryUseCard(cardOrder, targetIndex);
+            if (used)
+            {
+                PlayMonsterHitFx(targetIndex, predictedHit);
+                isAttackArmed = false;
+                selectedCardOrder = -1;
+                selectedTargetIndex = -1;
+            }
+            RefreshTexts();
+            return;
         }
     }
 
@@ -212,6 +297,7 @@ public class BattleUI : MonoBehaviour
         if (state != BattleState.PlayerTurn)
         {
             isAttackArmed = false;
+            selectedCardOrder = -1;
             selectedTargetIndex = -1;
         }
 
@@ -244,6 +330,14 @@ public class BattleUI : MonoBehaviour
                 $"Shield {stats.currentShield:0}\n" +
                 $"Dodge {stats.currentDodge:0}\n" +
                 $"HP Regen {stats.hpGen.FinalValue:0}";
+
+            if (prevPlayerHP >= 0f)
+            {
+                float delta = stats.currentHP - prevPlayerHP;
+                if (delta < 0f)
+                    PlayPlayerHitFx(Mathf.FloorToInt(-delta));
+            }
+            prevPlayerHP = stats.currentHP;
         }
 
         if (rightStatsText != null)
@@ -285,6 +379,29 @@ public class BattleUI : MonoBehaviour
         }
 
         RebuildHandCards();
+
+        if (handHintText != null)
+        {
+            int minCost = 999;
+            for (int i = 0; i < bm.CurrentHandCards.Count; i++)
+            {
+                BattleCardData cd = bm.CurrentHandCards[i]?.data;
+                if (cd == null) continue;
+                minCost = Mathf.Min(minCost, cd.costMana);
+            }
+            if (minCost == 999) minCost = 0;
+
+            if (bm.State != BattleState.PlayerTurn)
+                handHintText.text = "";
+            else if (bm.CurrentHandCount <= 0)
+                handHintText.text = "사용 가능한 카드가 없습니다.";
+            else if (bm.CurrentMana < minCost)
+                handHintText.text = "마나가 부족합니다.";
+            else if (isAttackArmed)
+                handHintText.text = "대상을 선택하세요. (1~0 / ESC / 우클릭)";
+            else
+                handHintText.text = "카드를 선택하세요. (1~0, Space: 턴 종료)";
+        }
 
         if (endTurnButton != null)
             endTurnButton.interactable = (bm.State == BattleState.PlayerTurn);
@@ -424,6 +541,25 @@ public class BattleUI : MonoBehaviour
             endTurnButton = go.GetComponent<Button>();
             endTurnButton.onClick.AddListener(() => BattleManager.Instance?.EndPlayerTurnByButton());
         }
+
+        if (handHintText == null)
+        {
+            GameObject go = new GameObject("HandHintText", typeof(RectTransform), typeof(Text));
+            go.transform.SetParent(handArea, false);
+            RectTransform rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0.5f, 0f);
+            rt.anchorMax = new Vector2(0.5f, 0f);
+            rt.pivot = new Vector2(0.5f, 0f);
+            rt.sizeDelta = new Vector2(520f, 28f);
+            rt.anchoredPosition = new Vector2(0f, 10f);
+
+            handHintText = go.GetComponent<Text>();
+            handHintText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            handHintText.alignment = TextAnchor.MiddleCenter;
+            handHintText.fontSize = 13;
+            handHintText.color = new Color(0.95f, 0.72f, 0.50f, 1f);
+            handHintText.text = "";
+        }
     }
 
     private void RebuildHandCards()
@@ -438,10 +574,14 @@ public class BattleUI : MonoBehaviour
         int count = Mathf.Max(0, bm.CurrentHandCount);
         for (int i = 0; i < count; i++)
         {
+            RuntimeBattleCard runtime = bm.CurrentHandCards[i];
+            BattleCardData cardData = runtime != null ? runtime.data : null;
+            if (cardData == null) continue;
+
             BattleCardItemUI card = CreateAttackCard();
             if (card == null) continue;
 
-            bool canUse = (bm.State == BattleState.PlayerTurn && bm.CurrentMana >= bm.defaultAttackCostMana);
+            bool canUse = (bm.State == BattleState.PlayerTurn && bm.CurrentMana >= cardData.costMana);
             if (card.button != null)
                 card.button.interactable = canUse;
 
@@ -453,11 +593,30 @@ public class BattleUI : MonoBehaviour
             if (card.costText != null)  card.costText.color  = canUse ? new Color(0.93f, 0.86f, 0.65f, 1f) : new Color(0.62f, 0.62f, 0.62f, 1f);
             if (card.descText != null)  card.descText.color  = canUse ? new Color(0.93f, 0.86f, 0.65f, 1f) : new Color(0.62f, 0.62f, 0.62f, 1f);
 
-            string title = (isAttackArmed && i == 0) ? "[선택중] 공격" : "공격";
-            string desc = "몬스터 1체에게 피해를 줍니다.";
-            card.Bind(title, bm.defaultAttackCostMana, desc, () =>
+            bool selected = (i == selectedCardOrder);
+            string title = selected ? $"[선택중] {cardData.cardName}" : cardData.cardName;
+            string desc = string.IsNullOrEmpty(cardData.description) ? "-" : cardData.description;
+            int cardOrder = i;
+            card.Bind(title, cardData.costMana, desc, cardData.artwork, () =>
             {
-                isAttackArmed = true;
+                selectedCardOrder = cardOrder;
+                selectedTargetIndex = -1;
+
+                if (RequiresEnemyTarget(cardData))
+                {
+                    isAttackArmed = true;
+                    RefreshTexts();
+                    return;
+                }
+
+                // Self/None 타겟 카드는 즉시 사용
+                bool used = BattleManager.Instance != null && BattleManager.Instance.TryUseCard(cardOrder, -1);
+                if (used)
+                {
+                    isAttackArmed = false;
+                    selectedCardOrder = -1;
+                    selectedTargetIndex = -1;
+                }
                 RefreshTexts();
             });
 
@@ -487,9 +646,21 @@ public class BattleUI : MonoBehaviour
         BattleCardItemUI ui = go.GetComponent<BattleCardItemUI>();
         ui.button = go.GetComponent<Button>();
 
-        ui.titleText = CreateCardText(go.transform, "Title", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(8f, -8f), new Vector2(-8f, -36f), TextAnchor.UpperLeft, 14);
-        ui.costText  = CreateCardText(go.transform, "Cost",  new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-36f, -8f), new Vector2(-8f, -36f), TextAnchor.UpperRight, 16);
-        ui.descText  = CreateCardText(go.transform, "Desc",  new Vector2(0f, 0f), new Vector2(1f, 1f), new Vector2(8f, 8f), new Vector2(-8f, -44f), TextAnchor.LowerLeft, 12);
+        GameObject artGo = new GameObject("Artwork", typeof(RectTransform), typeof(Image));
+        artGo.transform.SetParent(go.transform, false);
+        RectTransform artRt = artGo.GetComponent<RectTransform>();
+        artRt.anchorMin = new Vector2(0f, 0.35f);
+        artRt.anchorMax = new Vector2(1f, 0.78f);
+        artRt.offsetMin = new Vector2(8f, 0f);
+        artRt.offsetMax = new Vector2(-8f, 0f);
+        Image artImg = artGo.GetComponent<Image>();
+        artImg.enabled = false;
+        artImg.preserveAspect = true;
+        ui.artworkImage = artImg;
+
+        ui.titleText = CreateCardText(go.transform, "Title", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(8f, -8f), new Vector2(-8f, -32f), TextAnchor.UpperLeft, 14);
+        ui.costText  = CreateCardText(go.transform, "Cost",  new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-36f, -8f), new Vector2(-8f, -32f), TextAnchor.UpperRight, 16);
+        ui.descText  = CreateCardText(go.transform, "Desc",  new Vector2(0f, 0f), new Vector2(1f, 0.34f), new Vector2(8f, 8f), new Vector2(-8f, -6f), TextAnchor.UpperLeft, 11);
 
         return ui;
     }
@@ -522,6 +693,7 @@ public class BattleUI : MonoBehaviour
         spawnedMonsterButtons.Clear();
         monsterButtonBgByIndex.Clear();
         monsterRootByIndex.Clear();
+        flashingMonsterIndices.Clear();
 
         BattleManager bm = BattleManager.Instance;
         if (bm == null || monsterContainer == null || bm.Monsters == null) return;
@@ -602,18 +774,29 @@ public class BattleUI : MonoBehaviour
                 }
 
                 BattleManager bmgr = BattleManager.Instance;
+                int cardOrder = selectedCardOrder >= 0 ? selectedCardOrder : 0;
+                RuntimeBattleCard runtime = (bmgr != null && cardOrder < bmgr.CurrentHandCards.Count) ? bmgr.CurrentHandCards[cardOrder] : null;
+                BattleCardData cardData = runtime != null ? runtime.data : null;
+
                 CharacterStats stats = bmgr != null ? (bmgr.characterStats != null ? bmgr.characterStats : CharacterStats.Instance) : CharacterStats.Instance;
                 int predictedHit = stats != null
                     ? BattleMath.CalcFinalDamage(stats.damageConst.FinalValue, stats.damagePer.FinalValue)
                     : 0;
+                if (cardData != null)
+                    predictedHit = Mathf.FloorToInt(predictedHit * Mathf.Max(0f, cardData.attackMultiplier) + cardData.amount);
 
-                bool used = bmgr != null && bmgr.TryUseDefaultAttack(targetIndex);
+                bool used = bmgr != null && bmgr.TryUseCard(cardOrder, targetIndex);
                 if (used)
                 {
                     PlayMonsterHitFx(targetIndex, predictedHit);
                     isAttackArmed = false;
+                    selectedCardOrder = -1;
                     selectedTargetIndex = -1;
+                    // TryUseCard 내부 OnBattleValuesChanged에서 RefreshTexts가 이미 호출됨.
+                    // 여기서 추가 Refresh를 호출하면 즉시 재생성되어 연출이 사라질 수 있음.
+                    return;
                 }
+
                 RefreshTexts();
             });
 
@@ -630,6 +813,7 @@ public class BattleUI : MonoBehaviour
             enter.callback.AddListener(_ =>
             {
                 if (bg == null) return;
+                if (flashingMonsterIndices.Contains(targetIndex)) return;
                 if (targetIndex == selectedTargetIndex) return;
                 bg.color = isAttackArmed ? colorMonsterTarget : colorMonsterHover;
             });
@@ -639,6 +823,7 @@ public class BattleUI : MonoBehaviour
             exit.callback.AddListener(_ =>
             {
                 if (bg == null) return;
+                if (flashingMonsterIndices.Contains(targetIndex)) return;
                 if (targetIndex == selectedTargetIndex)
                     bg.color = colorMonsterSelected;
                 else
@@ -665,6 +850,35 @@ public class BattleUI : MonoBehaviour
         }
     }
 
+    private bool RequiresEnemyTarget(BattleCardData card)
+    {
+        if (card == null) return false;
+        if (card.effectType != BattleCardEffectType.Attack) return false;
+
+        return card.targetType == BattleCardTargetType.EnemySingle
+            || card.targetType == BattleCardTargetType.EnemySingleAdjacent;
+    }
+
+    private int GetAliveMonsterIndexByOrder(int order)
+    {
+        BattleManager bm = BattleManager.Instance;
+        if (bm == null || bm.Monsters == null || order < 0) return -1;
+
+        int aliveOrder = 0;
+        for (int i = 0; i < bm.Monsters.Count; i++)
+        {
+            RuntimeMonster m = bm.Monsters[i];
+            if (m == null || m.IsDead) continue;
+
+            if (aliveOrder == order)
+                return i;
+
+            aliveOrder++;
+        }
+
+        return -1;
+    }
+
     private void ValidatePrefabSetup()
     {
         if (attackCardPrefab != null)
@@ -677,20 +891,45 @@ public class BattleUI : MonoBehaviour
     private void PlayMonsterHitFx(int targetIndex, int damage)
     {
         if (monsterButtonBgByIndex.TryGetValue(targetIndex, out Image bg) && bg != null)
-            StartCoroutine(CoFlashMonster(bg));
+            StartCoroutine(CoFlashMonster(targetIndex, bg));
 
         if (monsterRootByIndex.TryGetValue(targetIndex, out RectTransform rt) && rt != null)
             StartCoroutine(CoDamageFloat(rt, damage));
     }
 
-    private IEnumerator CoFlashMonster(Image bg)
+    private void PlayPlayerHitFx(int damage)
     {
-        Color prev = bg.color;
-        Color flash = new Color(1f, 0.55f, 0.55f, 1f);
+        if (leftHud != null)
+        {
+            Image bg = leftHud.GetComponent<Image>();
+            if (bg != null) StartCoroutine(CoFlashHud(bg, colorSideHud));
 
+            StartCoroutine(CoDamageFloat(leftHud, damage));
+        }
+    }
+
+    private IEnumerator CoFlashMonster(int targetIndex, Image bg)
+    {
+        flashingMonsterIndices.Add(targetIndex);
+
+        Color flash = new Color(1f, 0.55f, 0.55f, 1f);
         bg.color = flash;
-        yield return new WaitForSeconds(0.06f);
-        bg.color = prev;
+        yield return new WaitForSeconds(0.1f);
+
+        flashingMonsterIndices.Remove(targetIndex);
+
+        // 플래시 종료 후 현재 상태 기준 색으로 복구
+        if (targetIndex == selectedTargetIndex)
+            bg.color = colorMonsterSelected;
+        else
+            bg.color = isAttackArmed ? colorMonsterTarget : colorMonsterNormal;
+    }
+
+    private IEnumerator CoFlashHud(Image bg, Color baseColor)
+    {
+        bg.color = new Color(1f, 0.45f, 0.45f, 1f);
+        yield return new WaitForSeconds(0.1f);
+        bg.color = baseColor;
     }
 
     private IEnumerator CoDamageFloat(RectTransform target, int damage)
