@@ -319,7 +319,7 @@ public class BattleUI : MonoBehaviour
         }
 
         if (goldText != null)
-            goldText.text = $"Mana {bm.CurrentMana}  Hand {bm.CurrentHandCount}";
+            goldText.text = $"Mana {bm.CurrentMana}  Hand {bm.CurrentHandCardCount}/{bm.CurrentHandCount}";
 
         CharacterStats stats = bm.characterStats != null ? bm.characterStats : CharacterStats.Instance;
         if (leftStatsText != null && stats != null)
@@ -352,7 +352,7 @@ public class BattleUI : MonoBehaviour
                 $"State {bm.State}\n" +
                 $"Round {bm.RoundIndex}\n" +
                 $"Mana {bm.CurrentMana}\n" +
-                $"Hand {bm.CurrentHandCount}\n" +
+                $"Hand {bm.CurrentHandCardCount}/{bm.CurrentHandCount}\n" +
                 $"적 생존 {alive}\n" +
                 $"예상 피해 {bm.PredictedEnemyDamage}";
         }
@@ -393,7 +393,7 @@ public class BattleUI : MonoBehaviour
 
             if (bm.State != BattleState.PlayerTurn)
                 handHintText.text = "";
-            else if (bm.CurrentHandCount <= 0)
+            else if (bm.CurrentHandCardCount <= 0)
                 handHintText.text = "사용 가능한 카드가 없습니다.";
             else if (bm.CurrentMana < minCost)
                 handHintText.text = "마나가 부족합니다.";
@@ -571,7 +571,7 @@ public class BattleUI : MonoBehaviour
         BattleManager bm = BattleManager.Instance;
         if (bm == null || handCardContainer == null) return;
 
-        int count = Mathf.Max(0, bm.CurrentHandCount);
+        int count = Mathf.Max(0, bm.CurrentHandCardCount);
         for (int i = 0; i < count; i++)
         {
             RuntimeBattleCard runtime = bm.CurrentHandCards[i];

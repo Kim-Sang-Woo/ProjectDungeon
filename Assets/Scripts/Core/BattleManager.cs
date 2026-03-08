@@ -67,7 +67,10 @@ public class BattleManager : MonoBehaviour
 
     public int RoundIndex { get; private set; } = 0;
     public int CurrentMana { get; private set; } = 0;
-    public int CurrentHandCount => CurrentHandCards.Count;
+    /// <summary>라운드 기준 Hand 수치(최대 지급 목표치)</summary>
+    public int CurrentHandCount { get; private set; } = 0;
+    /// <summary>현재 실제 손패 카드 수</summary>
+    public int CurrentHandCardCount => CurrentHandCards.Count;
     public int PredictedEnemyDamage { get; private set; } = 0; // 다음 적 턴 예상 합산 피해
 
     public List<RuntimeBattleCard> CurrentHandCards { get; private set; } = new List<RuntimeBattleCard>();
@@ -341,11 +344,13 @@ public class BattleManager : MonoBehaviour
                 characterStats.Heal(characterStats.hpGen.FinalValue);
 
             CurrentMana = Mathf.FloorToInt(characterStats.baseMana.FinalValue);
-            BuildRoundHand(Mathf.FloorToInt(characterStats.maxHand.FinalValue));
+            CurrentHandCount = Mathf.FloorToInt(characterStats.maxHand.FinalValue);
+            BuildRoundHand(CurrentHandCount);
         }
         else
         {
             CurrentMana = 0;
+            CurrentHandCount = 0;
             CurrentHandCards.Clear();
         }
 
@@ -420,12 +425,14 @@ public class BattleManager : MonoBehaviour
 
         if (sourceDeck.Count == 0 || drawCount <= 0) return;
 
-        // 라운드마다 덱에서 랜덤 샘플링(중복 허용)
-        // = 무한 소스에서 복사해 오는 방식(with replacement)
-        for (int i = 0; i < drawCount; i++)
+        // 라운드마다 MaxHand 목표치만큼 지급 시도하되,
+        // 실제 손패는 장비가 제공한 카드 수량(덱 풀)까지만 지급
+        int count = Mathf.Min(drawCount, sourceDeck.Count);
+        for (int i = 0; i < count; i++)
         {
             int pick = rng.Next(0, sourceDeck.Count);
             BattleCardData cd = sourceDeck[pick];
+            sourceDeck.RemoveAt(pick);
             CurrentHandCards.Add(new RuntimeBattleCard(cd));
         }
     }
@@ -459,7 +466,7 @@ public class BattleManager : MonoBehaviour
             return true;
         }
 
-        if (CurrentHandCount <= 0)
+        if (CurrentHandCardCount <= 0)
         {
             if (debugLog) Debug.Log("[BattleManager] [PlayerTurn] 자동 턴 종료: 손패 0");
             return true;

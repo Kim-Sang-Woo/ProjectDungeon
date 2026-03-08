@@ -322,19 +322,40 @@ public class ItemTooltipUI : MonoBehaviour
         if (equip == null || equip.battleCards == null || equip.battleCards.Count == 0)
             return "";
 
-        var sb = new System.Text.StringBuilder();
-        bool first = true;
+        var countMap = new System.Collections.Generic.Dictionary<string, int>();
+        var order = new System.Collections.Generic.List<string>();
+
         for (int i = 0; i < equip.battleCards.Count; i++)
         {
             BattleCardData card = equip.battleCards[i];
             if (card == null) continue;
 
-            if (!first) sb.AppendLine();
-            sb.Append("<color=#9FD6FF>[")
-              .Append(card.cardName)
-              .Append("]</color>");
-            first = false;
+            string name = string.IsNullOrEmpty(card.cardName) ? "이름없음" : card.cardName;
+            if (!countMap.ContainsKey(name))
+            {
+                countMap[name] = 0;
+                order.Add(name);
+            }
+            countMap[name]++;
         }
+
+        if (order.Count == 0) return "";
+
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < order.Count; i++)
+        {
+            string name = order[i];
+            int qty = countMap[name];
+
+            if (i > 0) sb.AppendLine();
+            sb.Append("<color=#9FD6FF>[")
+              .Append(name)
+              .Append("]")
+              .Append(" x")
+              .Append(qty)
+              .Append("</color>");
+        }
+
         return sb.ToString();
     }
 
