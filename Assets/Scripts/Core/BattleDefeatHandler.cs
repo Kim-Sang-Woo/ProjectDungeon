@@ -26,9 +26,13 @@ public class BattleDefeatHandler : MonoBehaviour
         // 2) 시작 장비 재착용
         equipmentManager?.ReapplyStartEquips();
 
+        // 2-1) 런타임 스탯 완전 회복 (HP/Mana/Shield/Dodge)
+        CharacterStats stats = CharacterStats.Instance;
+        stats?.InitRuntimeValues();
+
         // 3) 0층 시작 지점 복귀 (임시 마을)
         dungeonManager?.ReturnToTownSpawn();
 
-        Debug.Log("[BattleDefeatHandler] 패배 복구 완료: 인벤토리 초기화 + 시작장비 재착용 + 0층 복귀");
+        Debug.Log("[BattleDefeatHandler] 패배 복구 완료: 인벤토리 초기화 + 시작장비 재착용 + 스탯 초기화 + 0층 복귀");
     }
 }

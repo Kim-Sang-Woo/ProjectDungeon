@@ -420,13 +420,12 @@ public class BattleManager : MonoBehaviour
 
         if (sourceDeck.Count == 0 || drawCount <= 0) return;
 
-        // 라운드마다 덱에서 랜덤 샘플링(중복 없이), 덱 부족 시 가능한 만큼만
-        int count = Mathf.Min(drawCount, sourceDeck.Count);
-        for (int i = 0; i < count; i++)
+        // 라운드마다 덱에서 랜덤 샘플링(중복 허용)
+        // = 무한 소스에서 복사해 오는 방식(with replacement)
+        for (int i = 0; i < drawCount; i++)
         {
             int pick = rng.Next(0, sourceDeck.Count);
             BattleCardData cd = sourceDeck[pick];
-            sourceDeck.RemoveAt(pick);
             CurrentHandCards.Add(new RuntimeBattleCard(cd));
         }
     }

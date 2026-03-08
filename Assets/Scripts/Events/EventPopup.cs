@@ -134,6 +134,10 @@ public class EventPopup : MonoBehaviour
             if (choice.directEffects != null)
                 foreach (var effect in choice.directEffects)
                     effect?.Execute();
+
+            // directEffects-only 선택지도 정상 완료로 간주하여
+            // isOneTime 오브젝트 소진 콜백이 실행되도록 허용
+            consumeReady = true;
             Close();
             return;
         }
