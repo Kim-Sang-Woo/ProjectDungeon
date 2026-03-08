@@ -59,6 +59,7 @@ public class InventoryUI : MonoBehaviour
 
     private const int GRID_COLUMNS = 4;
     private const int MAX_SLOTS    = 40; // 4×10
+    private const string DRAG_BUILD_TAG = "INV_DRAG_e7d0ee3";
 
     private List<GameObject> spawnedSlots = new List<GameObject>();
     private Dictionary<int, Image> slotBackgroundByIndex = new Dictionary<int, Image>();
@@ -94,6 +95,7 @@ public class InventoryUI : MonoBehaviour
         ApplyGridLayout();
 
         rootCanvas = GetComponentInParent<Canvas>();
+        Debug.Log($"[InventoryUI] Drag build: {DRAG_BUILD_TAG}");
     }
 
     private void OnDestroy()
