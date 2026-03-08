@@ -27,7 +27,7 @@ public class MovementSystem : MonoBehaviour
     public Vector2Int CurrentTilePosition { get; private set; }
     public bool IsMoving { get; private set; }
 
-    private bool  inputLocked = false;
+    private int   inputLockCount = 0;
     private float baseSpeed;          // 감속 전 원본 속도
 
     private List<Vector2Int> currentPath;
@@ -91,7 +91,7 @@ public class MovementSystem : MonoBehaviour
 
     private void HandleClickInput()
     {
-        if (inputLocked) return;
+        if (IsInputLocked) return;
         if (!Input.GetMouseButtonDown(0)) return;
         if (mainCamera    == null) return;
         if (dungeonManager == null) return;
@@ -116,17 +116,26 @@ public class MovementSystem : MonoBehaviour
 
     // ─── 입력 잠금 ───
 
+    public bool IsInputLocked => inputLockCount > 0;
+
     public void LockInput()
     {
-        inputLocked = true;
+        inputLockCount++;
         StopMovement();
-        Debug.Log("[MovementSystem] 입력 잠금");
+        Debug.Log($"[MovementSystem] 입력 잠금 (count={inputLockCount})");
     }
 
     public void UnlockInput()
     {
-        inputLocked = false;
-        Debug.Log("[MovementSystem] 입력 잠금 해제");
+        inputLockCount = Mathf.Max(0, inputLockCount - 1);
+        Debug.Log($"[MovementSystem] 입력 잠금 해제 (count={inputLockCount})");
+    }
+
+    /// <summary>긴급 복구용: 모든 입력 잠금을 해제한다.</summary>
+    public void UnlockAllInputLocks()
+    {
+        inputLockCount = 0;
+        Debug.Log("[MovementSystem] 입력 잠금 전체 해제 (count=0)");
     }
 
     // ─── 이동 API ───
@@ -148,7 +157,7 @@ public class MovementSystem : MonoBehaviour
     public void MoveTo(Vector2Int target)
     {
         if (IsMoving)    return;
-        if (inputLocked) return;
+        if (IsInputLocked) return;
 
         List<Vector2Int> path = FindPath(CurrentTilePosition, target);
         if (path == null || path.Count < 2) return;

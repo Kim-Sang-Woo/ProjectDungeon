@@ -13,6 +13,7 @@
 //   RewardManager.Instance.Open(rewardData)   ← RewardData SO 직접
 //   RewardManager.Instance.Open(rewardId)     ← ID 문자열로 조회 (RewardTable 필요 시 확장)
 // ============================================================
+using System.Collections.Generic;
 using UnityEngine;
 
 public class RewardManager : MonoBehaviour
@@ -47,8 +48,43 @@ public class RewardManager : MonoBehaviour
             return;
         }
 
-        // 각 그룹에서 Roll() → 결과 아이템 목록 생성
-        var results = new System.Collections.Generic.List<RewardItemEntry>();
+        var results = RollEntries(data);
+        Debug.Log($"[RewardManager] Open: {data.rewardId} — {results.Count}개 아이템 지급");
+        popupUI.Show(data.displayName, results);
+    }
+
+    /// <summary>여러 RewardData를 합산하여 단일 팝업으로 연다.</summary>
+    public void OpenCombined(string displayName, IEnumerable<RewardData> rewards)
+    {
+        if (popupUI == null)
+        {
+            Debug.LogError("[RewardManager] popupUI가 연결되지 않았습니다.");
+            return;
+        }
+
+        List<RewardItemEntry> merged = new List<RewardItemEntry>();
+        if (rewards != null)
+        {
+            foreach (var r in rewards)
+            {
+                if (r == null) continue;
+                var entries = RollEntries(r);
+                foreach (var e in entries)
+                {
+                    merged.Add(e);
+                    if (merged.Count >= 16) break;
+                }
+                if (merged.Count >= 16) break;
+            }
+        }
+
+        popupUI.Show(displayName, merged);
+    }
+
+    private List<RewardItemEntry> RollEntries(RewardData data)
+    {
+        var results = new List<RewardItemEntry>();
+        if (data == null) return results;
 
         if (data.groups != null)
         {
@@ -57,14 +93,11 @@ public class RewardManager : MonoBehaviour
                 if (group == null) continue;
                 RewardItemEntry entry = group.Roll();
                 if (entry != null) results.Add(entry);
-
-                // 그리드 최대 16슬롯
                 if (results.Count >= 16) break;
             }
         }
 
-        Debug.Log($"[RewardManager] Open: {data.rewardId} — {results.Count}개 아이템 지급");
-        popupUI.Show(data.displayName, results);
+        return results;
     }
 
     /// <summary>RewardPopupPanel을 닫는다. EventPopup 닫힐 때 연동 호출.</summary>

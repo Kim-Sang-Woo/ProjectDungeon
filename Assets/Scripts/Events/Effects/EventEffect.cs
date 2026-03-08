@@ -242,3 +242,43 @@ public class StairsMoveEffect : EventEffect
 
     public override string GetEffectText() => "";
 }
+
+/// <summary>
+/// 이벤트에서 전투를 시작한다.
+/// EventChoice.directEffects 또는 EventResult.effects에서 사용.
+/// </summary>
+[Serializable]
+public class StartBattleEffect : EventEffect
+{
+    [Tooltip("전투에 사용할 인카운트 데이터")]
+    public EncounterData encounter;
+
+    [Tooltip("명시하지 않으면 BattleManager.Instance 사용")]
+    public BattleManager battleManager;
+
+    public override void Execute()
+    {
+        BattleManager bm = battleManager != null ? battleManager : BattleManager.Instance;
+        if (bm == null)
+        {
+            Debug.LogWarning("[StartBattleEffect] BattleManager를 찾을 수 없습니다.");
+            return;
+        }
+
+        if (encounter == null)
+        {
+            Debug.LogWarning("[StartBattleEffect] encounter가 비어 있습니다.");
+            return;
+        }
+
+        bm.StartBattle(encounter);
+    }
+
+    public override string GetEffectText()
+    {
+        string n = encounter != null && !string.IsNullOrEmpty(encounter.displayName)
+            ? encounter.displayName
+            : "미지의 인카운트";
+        return $"<color=#e8a040>전투 시작: {n}</color>";
+    }
+}
