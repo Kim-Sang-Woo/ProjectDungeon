@@ -15,6 +15,9 @@ using UnityEngine.EventSystems;
 
 public class MovementSystem : MonoBehaviour
 {
+    [Header("디버그")]
+    public bool debugLogs = false;
+
     [Header("속도 설정")]
     [Tooltip("기본 이동 속도 (칸/sec)")]
     public float moveSpeed = 5f;
@@ -84,7 +87,7 @@ public class MovementSystem : MonoBehaviour
         else
             moveSpeed = baseSpeed;
 
-        Debug.Log($"[MovementSystem] 이동속도 변경: {moveSpeed:F2} (감속:{isSlow})");
+        if (debugLogs) Debug.Log($"[MovementSystem] 이동속도 변경: {moveSpeed:F2} (감속:{isSlow})");
     }
 
     // ─── 입력 처리 ───
@@ -122,20 +125,20 @@ public class MovementSystem : MonoBehaviour
     {
         inputLockCount++;
         StopMovement();
-        Debug.Log($"[MovementSystem] 입력 잠금 (count={inputLockCount})");
+        if (debugLogs) Debug.Log($"[MovementSystem] 입력 잠금 (count={inputLockCount})");
     }
 
     public void UnlockInput()
     {
         inputLockCount = Mathf.Max(0, inputLockCount - 1);
-        Debug.Log($"[MovementSystem] 입력 잠금 해제 (count={inputLockCount})");
+        if (debugLogs) Debug.Log($"[MovementSystem] 입력 잠금 해제 (count={inputLockCount})");
     }
 
     /// <summary>긴급 복구용: 모든 입력 잠금을 해제한다.</summary>
     public void UnlockAllInputLocks()
     {
         inputLockCount = 0;
-        Debug.Log("[MovementSystem] 입력 잠금 전체 해제 (count=0)");
+        if (debugLogs) Debug.Log("[MovementSystem] 입력 잠금 전체 해제 (count=0)");
     }
 
     // ─── 이동 API ───

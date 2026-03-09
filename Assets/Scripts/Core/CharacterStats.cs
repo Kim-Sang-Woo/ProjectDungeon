@@ -38,6 +38,9 @@ public class CharacterStats : MonoBehaviour
 {
     public static CharacterStats Instance { get; private set; }
 
+    [Header("디버그")]
+    public bool debugLogs = false;
+
     [Header("인벤토리 제한")]
     [Tooltip("보유 가능한 최대 아이템 슬롯 수")]
     public int   maxItemSlot = 30;
@@ -170,7 +173,7 @@ public class CharacterStats : MonoBehaviour
         if (currentDodge > 0)
         {
             currentDodge = Mathf.Max(0, currentDodge - 1);
-            Debug.Log($"[CharacterStats] 회피! 남은 회피:{currentDodge}");
+            if (debugLogs) Debug.Log($"[CharacterStats] 회피! 남은 회피:{currentDodge}");
             OnStatsChanged?.Invoke();
             return;
         }
@@ -186,7 +189,7 @@ public class CharacterStats : MonoBehaviour
 
         currentHP = Mathf.Max(0, currentHP - remaining);
         OnStatsChanged?.Invoke();
-        Debug.Log($"[CharacterStats] 피해:{amount} → HP:{currentHP}/{maxHP.FinalValue}");
+        if (debugLogs) Debug.Log($"[CharacterStats] 피해:{amount} → HP:{currentHP}/{maxHP.FinalValue}");
     }
 
     public void Heal(float amount)

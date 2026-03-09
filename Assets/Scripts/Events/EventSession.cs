@@ -185,7 +185,7 @@ public class EventSession
             case EquipType.Gloves:   return "장갑";
             case EquipType.Armor:    return "갑옷";
             case EquipType.Ring:     return "반지";
-            case EquipType.Amulet:   return "장신구";
+            case EquipType.Amulet:   return "보조 장비";
             case EquipType.Boots:    return "신발";
             case EquipType.Bag:      return "가방";
             default:                 return slot.ToString();

@@ -34,6 +34,9 @@ public class FloatingTextUI : MonoBehaviour
     [Tooltip("플레이어 Transform")]
     public Transform playerTransform;
 
+    [Header("디버그")]
+    public bool debugLogs = false;
+
     [Header("연출 설정")]
     [Tooltip("텍스트가 올라가는 거리 (월드 유닛)")]
     public float riseDistance = 1.5f;
@@ -110,7 +113,8 @@ public class FloatingTextUI : MonoBehaviour
 
         if (cam == null || canvasRect == null)
         {
-            Debug.LogWarning($"[FloatingText] 참조 없음 — cam:{cam != null} canvasRect:{canvasRect != null}");
+            if (debugLogs)
+                Debug.LogWarning($"[FloatingText] 참조 없음 — cam:{cam != null} canvasRect:{canvasRect != null}");
             yield break;
         }
 
@@ -122,15 +126,22 @@ public class FloatingTextUI : MonoBehaviour
         RectTransformUtility.ScreenPointToLocalPointInRectangle(
             canvasRect, screenPos, uiCam, out Vector2 localPos);
 
-        Debug.Log($"[FloatingText] worldPos:{worldPos} screenPos:{screenPos} localPos:{localPos} canvasSize:{canvasRect.sizeDelta}");
+        if (debugLogs)
+            Debug.Log($"[FloatingText] worldPos:{worldPos} screenPos:{screenPos} localPos:{localPos} canvasSize:{canvasRect.sizeDelta}");
 
-        Debug.Log($"[FloatingText] localPos:{localPos} / prefab:{floatingTextPrefab != null} / 생성 시도");
+        if (debugLogs)
+            Debug.Log($"[FloatingText] localPos:{localPos} / prefab:{floatingTextPrefab != null} / 생성 시도");
 
         // 텍스트 오브젝트 생성 — canvasRect.transform으로 부모 명시
         GameObject go = Instantiate(floatingTextPrefab, canvasRect.transform);
-        if (go == null) { Debug.LogWarning("[FloatingText] Instantiate 실패"); yield break; }
+        if (go == null)
+        {
+            if (debugLogs) Debug.LogWarning("[FloatingText] Instantiate 실패");
+            yield break;
+        }
 
-        Debug.Log($"[FloatingText] 생성됨 — name:{go.name} active:{go.activeSelf} parent:{go.transform.parent?.name}");
+        if (debugLogs)
+            Debug.Log($"[FloatingText] 생성됨 — name:{go.name} active:{go.activeSelf} parent:{go.transform.parent?.name}");
 
         RectTransform rect = go.GetComponent<RectTransform>();
         if (rect == null) rect = go.AddComponent<RectTransform>();

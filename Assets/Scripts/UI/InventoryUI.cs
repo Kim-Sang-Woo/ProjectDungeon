@@ -57,6 +57,9 @@ public class InventoryUI : MonoBehaviour
     public EquipmentUI   equipmentUI;
     public ItemTooltipUI tooltipUI;
 
+    [Header("디버그")]
+    public bool debugLogs = false;
+
     private const int GRID_COLUMNS = 4;
     private const int MAX_SLOTS    = 40; // 4×10
     private const string DRAG_BUILD_TAG = "INV_DRAG_e7d0ee3";
@@ -95,7 +98,7 @@ public class InventoryUI : MonoBehaviour
         ApplyGridLayout();
 
         rootCanvas = GetComponentInParent<Canvas>();
-        Debug.Log($"[InventoryUI] Drag build: {DRAG_BUILD_TAG}");
+        if (debugLogs) Debug.Log($"[InventoryUI] Drag build: {DRAG_BUILD_TAG}");
     }
 
     private void OnDestroy()
@@ -249,8 +252,9 @@ public class InventoryUI : MonoBehaviour
             }
         }
 
-        Debug.Log($"[InventoryUI] 레이아웃 확정 — 패널:{panelWidth}×{totalH} " +
-                  $"(헤더:{headerHeight} 장비섹션:{equipSectionH} 아이템섹션:{itemSectionH})");
+        if (debugLogs)
+            Debug.Log($"[InventoryUI] 레이아웃 확정 — 패널:{panelWidth}×{totalH} " +
+                      $"(헤더:{headerHeight} 장비섹션:{equipSectionH} 아이템섹션:{itemSectionH})");
     }
 
     private float CalcEquipSectionHeight()
@@ -363,7 +367,8 @@ public class InventoryUI : MonoBehaviour
         if (qtyText != null)
         {
             bool show = slot.item.isStackable && slot.quantity > 1;
-            Debug.Log($"[InvUI] {slot.item.itemName} isStackable={slot.item.isStackable} qty={slot.quantity} show={show} qtyObj={qtyText.gameObject.name}");
+            if (debugLogs)
+                Debug.Log($"[InvUI] {slot.item.itemName} isStackable={slot.item.isStackable} qty={slot.quantity} show={show} qtyObj={qtyText.gameObject.name}");
             qtyText.gameObject.SetActive(show);
             if (show) qtyText.text = slot.quantity.ToString();
         }
@@ -458,7 +463,7 @@ public class InventoryUI : MonoBehaviour
         if (slot == null) return;
         tooltipUI?.Hide();
         Inventory.Instance?.RemoveAt(index);
-        Debug.Log($"[InventoryUI] 아이템 버리기: {slot.item.itemName}");
+        if (debugLogs) Debug.Log($"[InventoryUI] 아이템 버리기: {slot.item.itemName}");
     }
 
     private void BeginItemDrag(int slotIndex, InventorySlot slot, PointerEventData eventData)

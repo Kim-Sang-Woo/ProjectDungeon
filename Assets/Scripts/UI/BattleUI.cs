@@ -31,6 +31,9 @@ public class BattleUI : MonoBehaviour
     public BattleMonsterItemUI monsterItemPrefab;
     public Sprite intentAttackSprite;
 
+    [Header("디버그")]
+    public bool debugLogs = false;
+
     [Header("레이아웃 수치")]
     public float width = 1280f;
     public float height = 720f;
@@ -68,6 +71,9 @@ public class BattleUI : MonoBehaviour
     private readonly Color colorMonsterHover = new Color(0.24f, 0.18f, 0.10f, 0.98f);
     private readonly Color colorMonsterTarget = new Color(0.32f, 0.24f, 0.12f, 1f);
     private readonly Color colorMonsterSelected = new Color(0.38f, 0.30f, 0.14f, 1f);
+
+    private int lastHandSignature = int.MinValue;
+    private int lastMonsterSignature = int.MinValue;
 
     private void Awake()
     {
@@ -161,11 +167,7 @@ public class BattleUI : MonoBehaviour
             BattleCardData cardData = runtime != null ? runtime.data : null;
 
             CharacterStats stats = bm != null ? (bm.characterStats != null ? bm.characterStats : CharacterStats.Instance) : CharacterStats.Instance;
-            int predictedHit = stats != null
-                ? BattleMath.CalcFinalDamage(stats.damageConst.FinalValue, stats.damagePer.FinalValue)
-                : 0;
-            if (cardData != null)
-                predictedHit = Mathf.FloorToInt(predictedHit * Mathf.Max(0f, cardData.attackMultiplier) + cardData.amount);
+            int predictedHit = EstimateCardPrimaryHit(cardData, stats);
 
             bool used = bm != null && bm.TryUseCard(cardOrder, targetIndex);
             if (used)
@@ -281,9 +283,13 @@ public class BattleUI : MonoBehaviour
         }
 
         BuildHandControls();
+
+        // 최초 1회 강제 리빌드
+        lastHandSignature = int.MinValue;
+        lastMonsterSignature = int.MinValue;
         RebuildMonsterButtons();
 
-        Debug.Log("[BattleUI] ApplyLayout 완료");
+        if (debugLogs) Debug.Log("[BattleUI] ApplyLayout 완료");
     }
 
     private void OnBattleStateChanged(BattleState state)
@@ -378,7 +384,12 @@ public class BattleUI : MonoBehaviour
             }
         }
 
-        RebuildHandCards();
+        int handSig = ComputeHandSignature(bm);
+        if (handSig != lastHandSignature)
+        {
+            RebuildHandCards();
+            lastHandSignature = handSig;
+        }
 
         if (handHintText != null)
         {
@@ -412,8 +423,54 @@ public class BattleUI : MonoBehaviour
                 selectedTargetIndex = -1;
         }
 
-        RebuildMonsterButtons();
+        int monsterSig = ComputeMonsterSignature(bm);
+        if (monsterSig != lastMonsterSignature)
+        {
+            RebuildMonsterButtons();
+            lastMonsterSignature = monsterSig;
+        }
         ApplyMonsterTargetVisual();
+    }
+
+    private int ComputeHandSignature(BattleManager bm)
+    {
+        unchecked
+        {
+            int h = 17;
+            h = h * 31 + (int)bm.State;
+            h = h * 31 + bm.CurrentMana;
+            h = h * 31 + bm.CurrentHandCount;
+            h = h * 31 + bm.CurrentHandCardCount;
+            h = h * 31 + (isAttackArmed ? 1 : 0);
+            h = h * 31 + selectedCardOrder;
+
+            for (int i = 0; i < bm.CurrentHandCards.Count; i++)
+            {
+                var c = bm.CurrentHandCards[i]?.data;
+                h = h * 31 + (c != null ? c.GetInstanceID() : 0);
+            }
+
+            return h;
+        }
+    }
+
+    private int ComputeMonsterSignature(BattleManager bm)
+    {
+        unchecked
+        {
+            int h = 23;
+            h = h * 31 + bm.Monsters.Count;
+
+            for (int i = 0; i < bm.Monsters.Count; i++)
+            {
+                RuntimeMonster m = bm.Monsters[i];
+                h = h * 31 + (m != null ? m.currentHP : -1);
+                h = h * 31 + (m != null && m.IsDead ? 1 : 0);
+                h = h * 31 + (m != null && m.data != null ? m.data.GetInstanceID() : 0);
+            }
+
+            return h;
+        }
     }
 
     private void BuildResultBanner()
@@ -779,11 +836,7 @@ public class BattleUI : MonoBehaviour
                 BattleCardData cardData = runtime != null ? runtime.data : null;
 
                 CharacterStats stats = bmgr != null ? (bmgr.characterStats != null ? bmgr.characterStats : CharacterStats.Instance) : CharacterStats.Instance;
-                int predictedHit = stats != null
-                    ? BattleMath.CalcFinalDamage(stats.damageConst.FinalValue, stats.damagePer.FinalValue)
-                    : 0;
-                if (cardData != null)
-                    predictedHit = Mathf.FloorToInt(predictedHit * Mathf.Max(0f, cardData.attackMultiplier) + cardData.amount);
+                int predictedHit = EstimateCardPrimaryHit(cardData, stats);
 
                 bool used = bmgr != null && bmgr.TryUseCard(cardOrder, targetIndex);
                 if (used)
@@ -850,39 +903,91 @@ public class BattleUI : MonoBehaviour
         }
     }
 
+    private int EstimateCardPrimaryHit(BattleCardData card, CharacterStats stats)
+    {
+        if (card == null || stats == null) return 0;
+
+        var effects = card.GetEffects();
+        if (effects == null) return 0;
+
+        for (int i = 0; i < effects.Count; i++)
+        {
+            var e = effects[i];
+            if (e == null || e.effectType != BattleCardEffectType.Attack) continue;
+
+            int baseHit = BattleMath.CalcFinalDamage(stats.damageConst.FinalValue, stats.damagePer.FinalValue);
+            return Mathf.Max(0, Mathf.FloorToInt(baseHit * Mathf.Max(0f, e.attackMultiplier) + e.amount));
+        }
+
+        return 0;
+    }
+
     private string BuildCardAutoDescription(BattleCardData card)
     {
         if (card == null) return "-";
 
-        switch (card.effectType)
+        var effects = card.GetEffects();
+        if (effects == null || effects.Count == 0) return "-";
+
+        System.Text.StringBuilder sb = new System.Text.StringBuilder();
+        for (int i = 0; i < effects.Count; i++)
         {
-            case BattleCardEffectType.Attack:
-                switch (card.targetType)
-                {
-                    case BattleCardTargetType.EnemyAll: return "모든 적에게 피해를 줍니다.";
-                    case BattleCardTargetType.EnemySingleAdjacent: return "대상과 인접한 적에게 피해를 줍니다.";
-                    default: return "적 1체에게 피해를 줍니다.";
-                }
-            case BattleCardEffectType.GainShield:
-                return $"방어를 {card.amount:0} 얻습니다.";
-            case BattleCardEffectType.Heal:
-                return $"체력을 {card.amount:0} 회복합니다.";
-            case BattleCardEffectType.GainDodge:
-                return $"회피를 {card.amount:0} 얻습니다.";
-            case BattleCardEffectType.GainMana:
-                return $"마나를 {card.amount:0} 얻습니다.";
-            default:
-                return "-";
+            var e = effects[i];
+            if (e == null) continue;
+
+            if (sb.Length > 0) sb.Append("\n");
+
+            switch (e.effectType)
+            {
+                case BattleCardEffectType.Attack:
+                    switch (e.targetType)
+                    {
+                        case BattleCardTargetType.EnemyAll: sb.Append("모든 적에게 피해를 줍니다."); break;
+                        case BattleCardTargetType.EnemySingleAdjacent: sb.Append("대상과 인접한 적에게 피해를 줍니다."); break;
+                        default: sb.Append("적 1체에게 피해를 줍니다."); break;
+                    }
+                    break;
+                case BattleCardEffectType.GainShield:
+                    sb.Append($"방어를 {e.amount:0} 얻습니다.");
+                    break;
+                case BattleCardEffectType.Heal:
+                    sb.Append($"체력을 {e.amount:0} 회복합니다.");
+                    break;
+                case BattleCardEffectType.GainDodge:
+                    sb.Append($"회피를 {e.amount:0} 얻습니다.");
+                    break;
+                case BattleCardEffectType.GainMana:
+                    sb.Append($"마나를 {e.amount:0} 얻습니다.");
+                    break;
+                case BattleCardEffectType.GainDamagePer:
+                    sb.Append($"피해%를 {e.amount:0} 얻습니다. (전투 종료까지)");
+                    break;
+                case BattleCardEffectType.DrawCard:
+                    sb.Append($"카드를 {e.amount:0}장 뽑습니다.");
+                    break;
+            }
         }
+
+        return sb.Length > 0 ? sb.ToString() : "-";
     }
 
     private bool RequiresEnemyTarget(BattleCardData card)
     {
         if (card == null) return false;
-        if (card.effectType != BattleCardEffectType.Attack) return false;
+        var effects = card.GetEffects();
+        if (effects == null) return false;
 
-        return card.targetType == BattleCardTargetType.EnemySingle
-            || card.targetType == BattleCardTargetType.EnemySingleAdjacent;
+        for (int i = 0; i < effects.Count; i++)
+        {
+            var e = effects[i];
+            if (e == null || e.effectType != BattleCardEffectType.Attack) continue;
+
+            if (e.targetType == BattleCardTargetType.EnemySingle
+                || e.targetType == BattleCardTargetType.EnemySingleAdjacent)
+                return true;
+        }
+
+        return false;
     }
 
     private int GetAliveMonsterIndexByOrder(int order)

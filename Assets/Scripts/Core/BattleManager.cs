@@ -84,6 +84,7 @@ public class BattleManager : MonoBehaviour
 
     private System.Random rng = new System.Random();
     private bool battleEndRequested = false;
+    private float tempBattleDamagePerBonus = 0f;
 
     private void Awake()
     {
@@ -121,6 +122,7 @@ public class BattleManager : MonoBehaviour
         characterStats.NotifyStatsChanged();
 
         battleEndRequested = false;
+        RemoveTempBattleDamagePerBonus();
         RoundIndex = 0;
         SetState(BattleState.BattleStart);
         OnBattleStarted?.Invoke();
@@ -174,6 +176,7 @@ public class BattleManager : MonoBehaviour
 
         SetState(BattleState.BattleEnd);
 
+        RemoveTempBattleDamagePerBonus();
         movementSystem?.UnlockAllInputLocks();
 
         if (debugLog)
@@ -201,80 +204,124 @@ public class BattleManager : MonoBehaviour
         if (CurrentMana < card.costMana)
             return false;
 
+        var effects = card.GetEffects();
+        if (effects == null || effects.Count == 0) return false;
+
         bool consumed = false;
 
-        switch (card.effectType)
+        for (int ei = 0; ei < effects.Count; ei++)
         {
-            case BattleCardEffectType.Attack:
-            {
-                int damage = CalcCardAttackDamage(card);
-                bool hitAny = false;
+            BattleCardEffectEntry e = effects[ei];
+            if (e == null) continue;
 
-                if (card.targetType == BattleCardTargetType.EnemyAll)
+            switch (e.effectType)
+            {
+                case BattleCardEffectType.Attack:
                 {
-                    foreach (var m in Monsters)
+                    int damage = CalcCardAttackDamage(e);
+                    bool hitAny = false;
+
+                    if (e.targetType == BattleCardTargetType.EnemyAll)
                     {
-                        if (m == null || m.IsDead) continue;
-                        ApplyDamageToMonster(m, damage);
-                        hitAny = true;
+                        foreach (var m in Monsters)
+                        {
+                            if (m == null || m.IsDead) continue;
+                            ApplyDamageToMonster(m, damage);
+                            hitAny = true;
+                        }
                     }
-                }
-                else if (card.targetType == BattleCardTargetType.EnemySingleAdjacent)
-                {
-                    if (targetIndex < 0 || targetIndex >= Monsters.Count) return false;
-                    for (int i = targetIndex - 1; i <= targetIndex + 1; i++)
+                    else if (e.targetType == BattleCardTargetType.EnemySingleAdjacent)
                     {
-                        if (i < 0 || i >= Monsters.Count) continue;
-                        RuntimeMonster m = Monsters[i];
-                        if (m == null || m.IsDead) continue;
-                        ApplyDamageToMonster(m, damage);
-                        hitAny = true;
+                        if (targetIndex < 0 || targetIndex >= Monsters.Count) return false;
+                        for (int i = targetIndex - 1; i <= targetIndex + 1; i++)
+                        {
+                            if (i < 0 || i >= Monsters.Count) continue;
+                            RuntimeMonster m = Monsters[i];
+                            if (m == null || m.IsDead) continue;
+                            ApplyDamageToMonster(m, damage);
+                            hitAny = true;
+                        }
                     }
+                    else // EnemySingle 기본
+                    {
+                        if (targetIndex < 0 || targetIndex >= Monsters.Count) return false;
+                        RuntimeMonster target = Monsters[targetIndex];
+
+                        // 앞선 다중 효과 타격으로 대상/전원이 이미 죽었을 수 있음
+                        if (target == null || target.IsDead)
+                        {
+                            if (AllMonstersDead())
+                            {
+                                consumed = true;
+                                break;
+                            }
+                            return false;
+                        }
+
+                        ApplyDamageToMonster(target, damage);
+                        hitAny = true;
+
+                        if (debugLog)
+                            Debug.Log($"[BattleManager] [PlayerTurn] 카드사용({card.cardName})[{ei}] -> {target.data?.monsterName} / dmg={damage} / mana={CurrentMana - card.costMana}");
+                    }
+
+                    if (!hitAny)
+                    {
+                        // 다중 효과 카드에서 앞선 타격으로 전원이 죽었다면
+                        // 후속 타격 효과는 no-op로 처리하고 정상 종료 흐름을 유지한다.
+                        if (AllMonstersDead())
+                        {
+                            consumed = true;
+                            break;
+                        }
+                        return false;
+                    }
+
+                    OnSfxCue?.Invoke("attack");
+                    OnSfxCue?.Invoke("enemy_hit");
+                    consumed = true;
+                    break;
                 }
-                else // EnemySingle 기본
+                case BattleCardEffectType.GainShield:
                 {
-                    if (targetIndex < 0 || targetIndex >= Monsters.Count) return false;
-                    RuntimeMonster target = Monsters[targetIndex];
-                    if (target == null || target.IsDead) return false;
-                    ApplyDamageToMonster(target, damage);
-                    hitAny = true;
-
-                    if (debugLog)
-                        Debug.Log($"[BattleManager] [PlayerTurn] 카드사용({card.cardName}) -> {target.data?.monsterName} / dmg={damage} / mana={CurrentMana - card.costMana}");
+                    if (characterStats == null) return false;
+                    characterStats.AddShield(e.amount);
+                    consumed = true;
+                    break;
                 }
-
-                if (!hitAny) return false;
-                OnSfxCue?.Invoke("attack");
-                OnSfxCue?.Invoke("enemy_hit");
-                consumed = true;
-                break;
-            }
-            case BattleCardEffectType.GainShield:
-            {
-                if (characterStats == null) return false;
-                characterStats.AddShield(card.amount);
-                consumed = true;
-                break;
-            }
-            case BattleCardEffectType.Heal:
-            {
-                if (characterStats == null) return false;
-                characterStats.Heal(card.amount);
-                consumed = true;
-                break;
-            }
-            case BattleCardEffectType.GainDodge:
-            {
-                if (characterStats == null) return false;
-                characterStats.AddDodge(card.amount);
-                consumed = true;
-                break;
-            }
-            case BattleCardEffectType.GainMana:
-            {
-                CurrentMana += Mathf.FloorToInt(card.amount);
-                consumed = true;
-                break;
+                case BattleCardEffectType.Heal:
+                {
+                    if (characterStats == null) return false;
+                    characterStats.Heal(e.amount);
+                    consumed = true;
+                    break;
+                }
+                case BattleCardEffectType.GainDodge:
+                {
+                    if (characterStats == null) return false;
+                    characterStats.AddDodge(e.amount);
+                    consumed = true;
+                    break;
+                }
+                case BattleCardEffectType.GainMana:
+                {
+                    CurrentMana += Mathf.FloorToInt(e.amount);
+                    consumed = true;
+                    break;
+                }
+                case BattleCardEffectType.GainDamagePer:
+                {
+                    AddTempBattleDamagePerBonus(e.amount);
+                    consumed = true;
+                    break;
+                }
+                case BattleCardEffectType.DrawCard:
+                {
+                    int draw = Mathf.Max(0, Mathf.FloorToInt(e.amount));
+                    DrawCardsToHand(draw, allowOverMaxHand: true);
+                    consumed = true;
+                    break;
+                }
             }
         }
 
@@ -364,15 +411,29 @@ public class BattleManager : MonoBehaviour
             Debug.Log($"[BattleManager] [RoundStart] R{RoundIndex} / mana={CurrentMana} hand={CurrentHandCount} / predictedEnemy={PredictedEnemyDamage}");
     }
 
-    private int CalcCardAttackDamage(BattleCardData card)
+    private int CalcCardAttackDamage(BattleCardEffectEntry effect)
     {
         float dmgConst = characterStats != null ? characterStats.damageConst.FinalValue : 0f;
         float dmgPer = characterStats != null ? characterStats.damagePer.FinalValue : 0f;
         int baseDamage = BattleMath.CalcFinalDamage(dmgConst, dmgPer);
 
-        float scaled = baseDamage * Mathf.Max(0f, card != null ? card.attackMultiplier : 1f);
-        float plus = card != null ? card.amount : 0f;
+        float scaled = baseDamage * Mathf.Max(0f, effect != null ? effect.attackMultiplier : 1f);
+        float plus = effect != null ? effect.amount : 0f;
         return Mathf.Max(0, Mathf.FloorToInt(scaled + plus));
+    }
+
+    private void AddTempBattleDamagePerBonus(float amount)
+    {
+        if (characterStats == null || amount == 0f) return;
+        characterStats.AddModifier(StatType.DamagePer, amount);
+        tempBattleDamagePerBonus += amount;
+    }
+
+    private void RemoveTempBattleDamagePerBonus()
+    {
+        if (characterStats == null || tempBattleDamagePerBonus == 0f) return;
+        characterStats.RemoveModifier(StatType.DamagePer, tempBattleDamagePerBonus);
+        tempBattleDamagePerBonus = 0f;
     }
 
     private void ApplyDamageToMonster(RuntimeMonster monster, int damage)
@@ -407,7 +468,38 @@ public class BattleManager : MonoBehaviour
         CurrentHandCards.Clear();
 
         int drawCount = Mathf.Max(0, maxHand);
+        DrawCardsToHand(drawCount, allowOverMaxHand: false);
+    }
 
+    private void DrawCardsToHand(int drawCount, bool allowOverMaxHand)
+    {
+        if (drawCount <= 0) return;
+
+        List<BattleCardData> sourceDeck = BuildDeckSourcePool();
+        if (sourceDeck.Count == 0) return;
+
+        int maxDraw = drawCount;
+        if (!allowOverMaxHand)
+        {
+            maxDraw = Mathf.Min(maxDraw, sourceDeck.Count);
+            int room = Mathf.Max(0, CurrentHandCount - CurrentHandCards.Count);
+            maxDraw = Mathf.Min(maxDraw, room);
+        }
+
+        for (int i = 0; i < maxDraw; i++)
+        {
+            int pick = rng.Next(0, sourceDeck.Count);
+            BattleCardData cd = sourceDeck[pick];
+
+            if (!allowOverMaxHand)
+                sourceDeck.RemoveAt(pick); // 라운드 기본 드로우는 중복 비허용
+
+            CurrentHandCards.Add(new RuntimeBattleCard(cd));
+        }
+    }
+
+    private List<BattleCardData> BuildDeckSourcePool()
+    {
         // 1순위: 장착 장비 기반 덱 풀
         List<BattleCardData> sourceDeck = BuildDeckPoolFromEquips();
 
@@ -423,18 +515,7 @@ public class BattleManager : MonoBehaviour
         if (sourceDeck.Count == 0 && fallbackAttackCard != null)
             sourceDeck.Add(fallbackAttackCard);
 
-        if (sourceDeck.Count == 0 || drawCount <= 0) return;
-
-        // 라운드마다 MaxHand 목표치만큼 지급 시도하되,
-        // 실제 손패는 장비가 제공한 카드 수량(덱 풀)까지만 지급
-        int count = Mathf.Min(drawCount, sourceDeck.Count);
-        for (int i = 0; i < count; i++)
-        {
-            int pick = rng.Next(0, sourceDeck.Count);
-            BattleCardData cd = sourceDeck[pick];
-            sourceDeck.RemoveAt(pick);
-            CurrentHandCards.Add(new RuntimeBattleCard(cd));
-        }
+        return sourceDeck;
     }
 
     private List<BattleCardData> BuildDeckPoolFromEquips()
