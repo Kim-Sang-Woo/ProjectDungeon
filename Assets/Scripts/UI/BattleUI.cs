@@ -828,7 +828,13 @@ public class BattleUI : MonoBehaviour
 
             bool canUse = (bm.State == BattleState.PlayerTurn && bm.CurrentMana >= cardData.costMana);
             if (card.button != null)
+            {
                 card.button.interactable = canUse;
+                ColorBlock cb = card.button.colors;
+                cb.disabledColor = new Color(0.4f, 0.4f, 0.4f, 0.8f);
+                cb.colorMultiplier = 1f;
+                card.button.colors = cb;
+            }
 
             Outline ol = card.GetComponent<Outline>() ?? card.gameObject.AddComponent<Outline>();
             ol.effectDistance = new Vector2(1f, -1f);
@@ -836,11 +842,38 @@ public class BattleUI : MonoBehaviour
 
             Image bg = card.GetComponent<Image>();
             if (bg != null)
-                bg.color = canUse ? new Color(0.16f, 0.13f, 0.09f, 1f) : new Color(0.10f, 0.10f, 0.10f, 1f);
+                bg.color = canUse ? new Color(0.16f, 0.13f, 0.09f, 1f) : new Color(0.4f, 0.4f, 0.4f, 0.8f);
 
-            if (card.titleText != null) card.titleText.color = canUse ? new Color(1f, 0.92f, 0.72f, 1f) : new Color(0.78f, 0.74f, 0.68f, 1f);
-            if (card.costText != null)  card.costText.color  = canUse ? Color.white : new Color(0.85f, 0.85f, 0.85f, 1f);
-            if (card.descText != null)  card.descText.color  = canUse ? new Color(0.93f, 0.86f, 0.65f, 1f) : new Color(0.62f, 0.62f, 0.62f, 1f);
+            Transform topBgT = card.transform.Find("TopBarBg");
+            if (topBgT != null)
+            {
+                Image topImg = topBgT.GetComponent<Image>();
+                if (topImg != null)
+                    topImg.color = canUse ? new Color(0.08f, 0.08f, 0.08f, 1f) : new Color(0.02f, 0.02f, 0.02f, 1f);
+            }
+
+            Transform descBgT = card.transform.Find("DescBg");
+            if (descBgT != null)
+            {
+                Image descImg = descBgT.GetComponent<Image>();
+                if (descImg != null)
+                    descImg.color = canUse ? new Color(0.08f, 0.08f, 0.08f, 1f) : new Color(0.015f, 0.015f, 0.015f, 1f);
+            }
+
+            Transform costBgT = card.transform.Find("CostBg");
+            if (costBgT != null)
+            {
+                Image costImg = costBgT.GetComponent<Image>();
+                if (costImg != null)
+                    costImg.color = canUse ? new Color(0.25f, 0.55f, 0.95f, 1f) : new Color(0.10f, 0.14f, 0.20f, 1f);
+            }
+
+            if (card.artworkImage != null)
+                card.artworkImage.color = canUse ? new Color(1f, 1f, 1f, 1f) : new Color(0.30f, 0.30f, 0.30f, 0.45f);
+
+            if (card.titleText != null) card.titleText.color = canUse ? new Color(1f, 0.92f, 0.72f, 1f) : new Color(0.42f, 0.42f, 0.42f, 1f);
+            if (card.costText != null)  card.costText.color  = canUse ? Color.white : new Color(0.60f, 0.60f, 0.60f, 1f);
+            if (card.descText != null)  card.descText.color  = canUse ? new Color(0.93f, 0.86f, 0.65f, 1f) : new Color(0.40f, 0.40f, 0.40f, 1f);
 
             bool selected = (i == selectedCardOrder);
             string title = cardData.cardName;
@@ -986,7 +1019,15 @@ public class BattleUI : MonoBehaviour
 
             Image bg = card.GetComponent<Image>();
             if (bg != null)
-                bg.color = selected ? new Color(0.24f, 0.19f, 0.10f, 1f) : (card.button != null && !card.button.interactable ? new Color(0.10f, 0.10f, 0.10f, 1f) : new Color(0.16f, 0.13f, 0.09f, 1f));
+            {
+                bool canUseCard = card.button != null && card.button.interactable;
+                if (!canUseCard)
+                    bg.color = new Color(0.4f, 0.4f, 0.4f, 0.8f);
+                else if (selected)
+                    bg.color = new Color(0.24f, 0.19f, 0.10f, 1f);
+                else
+                    bg.color = new Color(0.16f, 0.13f, 0.09f, 1f);
+            }
         }
 
         if (focusedRt != null)
