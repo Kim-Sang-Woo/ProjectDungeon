@@ -665,12 +665,22 @@ public class InventoryUI : MonoBehaviour
         BattleManager bm = BattleManager.Instance;
         if (bm == null) return false;
 
-        return bm.State == BattleState.BattleStart
+        bool inBattleState = bm.State == BattleState.BattleStart
             || bm.State == BattleState.RoundStart
             || bm.State == BattleState.PlayerTurn
             || bm.State == BattleState.EnemyTurn
             || bm.State == BattleState.Victory
             || bm.State == BattleState.Defeat;
+
+        if (!inBattleState) return false;
+
+        // BattleUI가 실제로 켜져 있을 때만 인벤토리 차단
+        if (BattleUI.Instance == null || BattleUI.Instance.canvasGroup == null)
+            return false;
+
+        CanvasGroup cg = BattleUI.Instance.canvasGroup;
+        bool battleUiVisible = cg.alpha > 0.01f && cg.interactable && cg.blocksRaycasts;
+        return battleUiVisible;
     }
 
     private void EnsureDragIcon()

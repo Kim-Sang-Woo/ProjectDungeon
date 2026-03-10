@@ -15,9 +15,8 @@ public class BattleMonsterItemUI : MonoBehaviour
     {
         bool ok = true;
         if (button == null) { ok = false; if (logWarning) Debug.LogWarning("[BattleMonsterItemUI] button 참조 누락"); }
-        if (nameText == null) { ok = false; if (logWarning) Debug.LogWarning("[BattleMonsterItemUI] nameText 참조 누락"); }
-        if (hpText == null) { ok = false; if (logWarning) Debug.LogWarning("[BattleMonsterItemUI] hpText 참조 누락"); }
-        // intentText는 선택(없으면 런타임 fallback 생성)
+        if (portraitImage == null) { ok = false; if (logWarning) Debug.LogWarning("[BattleMonsterItemUI] portraitImage 참조 누락"); }
+        // name/hp/hpFill은 사용하지 않아도 동작(몬스터 이미지 전용 UI)
         return ok;
     }
 
@@ -29,19 +28,13 @@ public class BattleMonsterItemUI : MonoBehaviour
         {
             portraitImage.sprite = monster.data.image;
             portraitImage.enabled = monster.data.image != null;
+            portraitImage.preserveAspect = true;
         }
 
-        if (nameText != null)
-            nameText.text = monster.data.monsterName;
-
-        int maxHp = Mathf.Max(1, monster.data.maxHP);
-        int curHp = Mathf.Max(0, monster.currentHP);
-
-        if (hpText != null)
-            hpText.text = $"HP {curHp}/{maxHp}";
-
-        if (hpFillImage != null)
-            hpFillImage.fillAmount = Mathf.Clamp01((float)curHp / maxHp);
+        // 요구사항: 몬스터 HP/이름은 노출하지 않고 이미지 중심으로 표시
+        if (nameText != null) nameText.gameObject.SetActive(false);
+        if (hpText != null) hpText.gameObject.SetActive(false);
+        if (hpFillImage != null) hpFillImage.gameObject.SetActive(false);
 
         if (intentIcon != null)
         {

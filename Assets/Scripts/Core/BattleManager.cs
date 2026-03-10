@@ -82,6 +82,8 @@ public class BattleManager : MonoBehaviour
     public event Action OnBattleValuesChanged;
     public event Action<string> OnSfxCue; // "round_start", "enemy_turn", "victory", "defeat", "attack", "enemy_hit"
 
+    private const int MaxRoundHandCards = 10;
+
     private System.Random rng = new System.Random();
     private bool battleEndRequested = false;
     private float tempBattleDamagePerBonus = 0f;
@@ -391,7 +393,7 @@ public class BattleManager : MonoBehaviour
                 characterStats.Heal(characterStats.hpGen.FinalValue);
 
             CurrentMana = Mathf.FloorToInt(characterStats.baseMana.FinalValue);
-            CurrentHandCount = Mathf.FloorToInt(characterStats.maxHand.FinalValue);
+            CurrentHandCount = Mathf.Clamp(Mathf.FloorToInt(characterStats.maxHand.FinalValue), 0, MaxRoundHandCards);
             BuildRoundHand(CurrentHandCount);
         }
         else
@@ -479,11 +481,14 @@ public class BattleManager : MonoBehaviour
         if (sourceDeck.Count == 0) return;
 
         int maxDraw = drawCount;
+
+        int handLimit = Mathf.Clamp(CurrentHandCount, 0, MaxRoundHandCards);
+        int room = Mathf.Max(0, handLimit - CurrentHandCards.Count);
+        maxDraw = Mathf.Min(maxDraw, room);
+
         if (!allowOverMaxHand)
         {
             maxDraw = Mathf.Min(maxDraw, sourceDeck.Count);
-            int room = Mathf.Max(0, CurrentHandCount - CurrentHandCards.Count);
-            maxDraw = Mathf.Min(maxDraw, room);
         }
 
         for (int i = 0; i < maxDraw; i++)
