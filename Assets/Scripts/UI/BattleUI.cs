@@ -55,6 +55,9 @@ public class BattleUI : MonoBehaviour
     public float sideHudWidth = 180f;
     public float padding = 16f;
 
+    [Header("몬스터 패널")]
+    public Vector2 monsterPanelSize = new Vector2(192f, 240f);
+
     [Header("색상")]
     public Color colorTopBar = new Color(0.10f, 0.08f, 0.05f, 1f);
     public Color colorBattleField = new Color(0.16f, 0.12f, 0.08f, 1f);
@@ -117,10 +120,10 @@ public class BattleUI : MonoBehaviour
 
     private int selectedTargetIndex = -1;
 
-    private readonly Color colorMonsterNormal = new Color(0.15f, 0.13f, 0.09f, 0.95f);
-    private readonly Color colorMonsterHover = new Color(0.24f, 0.18f, 0.10f, 0.98f);
-    private readonly Color colorMonsterTarget = new Color(0.32f, 0.24f, 0.12f, 1f);
-    private readonly Color colorMonsterSelected = new Color(0.38f, 0.30f, 0.14f, 1f);
+    private readonly Color colorMonsterNormal = new Color(0f, 0f, 0f, 0f);
+    private readonly Color colorMonsterHover = new Color(0f, 0f, 0f, 0f);
+    private readonly Color colorMonsterTarget = new Color(0f, 0f, 0f, 0f);
+    private readonly Color colorMonsterSelected = new Color(0f, 0f, 0f, 0f);
 
     private int lastHandSignature = int.MinValue;
     private int lastMonsterSignature = int.MinValue;
@@ -714,8 +717,8 @@ public class BattleUI : MonoBehaviour
         monsterContainer.anchorMin = new Vector2(0.5f, 0.5f);
         monsterContainer.anchorMax = new Vector2(0.5f, 0.5f);
         monsterContainer.pivot = new Vector2(0.5f, 0.5f);
-        monsterContainer.sizeDelta = new Vector2(760f, 220f);
-        monsterContainer.anchoredPosition = new Vector2(0f, 52f);
+        monsterContainer.sizeDelta = new Vector2(900f, 360f);
+        monsterContainer.anchoredPosition = new Vector2(0f, 40f);
 
         HorizontalLayoutGroup hlg = go.GetComponent<HorizontalLayoutGroup>();
         hlg.spacing = 24f;
@@ -1354,7 +1357,7 @@ public class BattleUI : MonoBehaviour
             }
             else
             {
-                go = CreateButton($"Monster_{i}", monsterContainer, "", new Vector2(96f, 120f));
+                go = CreateButton($"Monster_{i}", monsterContainer, "", monsterPanelSize);
                 monsterUI = go.GetComponent<BattleMonsterItemUI>() ?? go.AddComponent<BattleMonsterItemUI>();
                 monsterUI.button = go.GetComponent<Button>();
 
@@ -1412,6 +1415,14 @@ public class BattleUI : MonoBehaviour
                     monsterUI.intentText = itt;
                 }
             }
+
+            RectTransform slotRT = go.GetComponent<RectTransform>();
+            if (slotRT != null)
+                slotRT.sizeDelta = monsterPanelSize;
+
+            LayoutElement monsterLE = go.GetComponent<LayoutElement>() ?? go.AddComponent<LayoutElement>();
+            monsterLE.preferredWidth = monsterPanelSize.x;
+            monsterLE.preferredHeight = monsterPanelSize.y;
 
             if (monsterUI.intentIcon != null && intentAttackSprite != null)
                 monsterUI.intentIcon.sprite = intentAttackSprite;
