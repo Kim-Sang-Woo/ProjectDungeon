@@ -80,6 +80,7 @@ public class BattleManager : MonoBehaviour
     public event Action OnBattleEnded;
     public event Action<bool> OnBattleFinished; // true=victory, false=defeat
     public event Action OnBattleValuesChanged;
+    public event Action<int, int> OnMonsterDamaged; // (monsterIndex, damage)
     public event Action<string> OnSfxCue; // "round_start", "enemy_turn", "victory", "defeat", "attack", "enemy_hit"
 
     private const int MaxRoundHandCards = 10;
@@ -166,7 +167,6 @@ public class BattleManager : MonoBehaviour
         }
         else
         {
-            FloatingTextUI.Instance?.Show("전투 승리", FloatingTextUI.ColorAcquire);
             OnSfxCue?.Invoke("victory");
         }
 
@@ -357,16 +357,26 @@ public class BattleManager : MonoBehaviour
     public void GoToEnemyTurn()
     {
         if (State != BattleState.PlayerTurn) return;
+        StartCoroutine(CoEnemyTurnSequence());
+    }
+
+    private System.Collections.IEnumerator CoEnemyTurnSequence()
+    {
         SetState(BattleState.EnemyTurn);
-        FloatingTextUI.Instance?.Show("적 턴", FloatingTextUI.ColorWarning);
         OnSfxCue?.Invoke("enemy_turn");
 
-        ExecuteEnemyTurn();
+        float noticeWait = 0.76f;
+        if (BattleUI.Instance != null)
+            noticeWait = Mathf.Max(0f, BattleUI.Instance.battleFieldNoticeTotalDuration);
+        if (noticeWait > 0f)
+            yield return new WaitForSeconds(noticeWait);
+
+        yield return ExecuteEnemyTurnSequential();
 
         if (characterStats != null && characterStats.IsDead)
         {
             EndBattle(false);
-            return;
+            yield break;
         }
 
         BeginRound();
@@ -406,7 +416,6 @@ public class BattleManager : MonoBehaviour
         RecalculateEnemyIntent();
         OnBattleValuesChanged?.Invoke();
         SetState(BattleState.PlayerTurn);
-        FloatingTextUI.Instance?.Show($"라운드 {RoundIndex}", FloatingTextUI.ColorAcquire);
         OnSfxCue?.Invoke("round_start");
 
         if (debugLog)
@@ -441,28 +450,51 @@ public class BattleManager : MonoBehaviour
     private void ApplyDamageToMonster(RuntimeMonster monster, int damage)
     {
         if (monster == null || monster.IsDead) return;
-        monster.currentHP = Mathf.Max(0, monster.currentHP - Mathf.Max(0, damage));
+
+        int finalDamage = Mathf.Max(0, damage);
+        monster.currentHP = Mathf.Max(0, monster.currentHP - finalDamage);
+
+        int idx = Monsters != null ? Monsters.IndexOf(monster) : -1;
+        if (idx >= 0)
+            OnMonsterDamaged?.Invoke(idx, finalDamage);
     }
 
-    private void ExecuteEnemyTurn()
+    private System.Collections.IEnumerator ExecuteEnemyTurnSequential()
     {
-        if (characterStats == null) return;
+        if (characterStats == null) yield break;
 
-        foreach (var m in Monsters)
+        BattleUI ui = BattleUI.Instance;
+
+        for (int i = 0; i < Monsters.Count; i++)
         {
+            RuntimeMonster m = Monsters[i];
             if (m == null || m.IsDead || m.data == null) continue;
 
             int damage = BattleMath.CalcFinalDamage(m.data.damageConst, m.data.damagePer);
-            characterStats.TakeDamage(damage);
+
+            if (ui != null)
+            {
+                yield return ui.PlayEnemyAttackFx(i, () =>
+                {
+                    OnSfxCue?.Invoke("enemy_hit");
+                    characterStats.TakeDamage(damage);
+                    OnBattleValuesChanged?.Invoke();
+                }, damage);
+            }
+            else
+            {
+                characterStats.TakeDamage(damage);
+                OnBattleValuesChanged?.Invoke();
+            }
 
             if (debugLog)
                 Debug.Log($"[BattleManager] [EnemyTurn] {m.data.monsterName} -> player / dmg={damage}");
 
             if (characterStats.IsDead)
-                break;
-        }
+                yield break;
 
-        OnBattleValuesChanged?.Invoke();
+            yield return new WaitForSeconds(0.06f);
+        }
     }
 
     private void BuildRoundHand(int maxHand)
@@ -482,12 +514,11 @@ public class BattleManager : MonoBehaviour
 
         int maxDraw = drawCount;
 
-        int handLimit = Mathf.Clamp(CurrentHandCount, 0, MaxRoundHandCards);
-        int room = Mathf.Max(0, handLimit - CurrentHandCards.Count);
-        maxDraw = Mathf.Min(maxDraw, room);
-
         if (!allowOverMaxHand)
         {
+            int handLimit = Mathf.Clamp(CurrentHandCount, 0, MaxRoundHandCards);
+            int room = Mathf.Max(0, handLimit - CurrentHandCards.Count);
+            maxDraw = Mathf.Min(maxDraw, room);
             maxDraw = Mathf.Min(maxDraw, sourceDeck.Count);
         }
 

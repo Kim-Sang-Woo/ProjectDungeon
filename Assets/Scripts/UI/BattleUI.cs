@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -75,23 +76,39 @@ public class BattleUI : MonoBehaviour
     private Text rightEnemiesValueText;
     private Text rightExpDamageValueText;
     private Text resultBannerText;
+    private Text battleFieldNoticeText;
+    private Coroutine battleFieldNoticeCoroutine;
+    [Header("연출 타이밍")]
+    [Min(0f)] public float battleFieldNoticeTotalDuration = 0.76f;
+
+    [Header("적 공격 타격감")]
+    [Min(0f)] public float enemyAttackDownDuration = 0.08f;
+    [Min(0f)] public float enemyAttackHoldDuration = 0.05f;
+    [Min(0f)] public float enemyAttackUpDuration = 0.10f;
+    [Range(0f, 0.8f)] public float enemyAttackSpeedVariance = 0.25f;
+    [Min(0f)] public float hitShakeDuration = 0.10f;
+    [Min(0f)] public float hitShakeStrength = 5f;
+    public Vector2 monsterDamageTextOffset = Vector2.zero;
+
     private Text handHintText;
     private Text hpBlockText;
     private Text hpStatusText;
     private Text manaBlockText;
     private Image hpGaugeFillImage;
     private Image manaGaugeFillImage;
+    private RectTransform hpBlockRoot;
     private Image hpGaugeFrameImage;
     private Image manaGaugeFrameImage;
     private bool hpUseStageSprite;
     private float hpFillInset = 5f;
     private static Sprite runtimeFallbackUiSprite;
 
-    private float prevPlayerHP = -1f;
 
     private readonly List<GameObject> spawnedMonsterButtons = new List<GameObject>();
     private readonly Dictionary<int, Image> monsterButtonBgByIndex = new Dictionary<int, Image>();
     private readonly Dictionary<int, RectTransform> monsterRootByIndex = new Dictionary<int, RectTransform>();
+    private readonly Dictionary<int, RectTransform> monsterPortraitByIndex = new Dictionary<int, RectTransform>();
+    private readonly Dictionary<int, float> monsterDamageNextTime = new Dictionary<int, float>();
     private readonly HashSet<int> flashingMonsterIndices = new HashSet<int>();
     private readonly List<BattleCardItemUI> spawnedCards = new List<BattleCardItemUI>();
     private readonly List<int> spawnedCardOrders = new List<int>();
@@ -124,6 +141,7 @@ public class BattleUI : MonoBehaviour
         {
             BattleManager.Instance.OnBattleStateChanged += OnBattleStateChanged;
             BattleManager.Instance.OnBattleValuesChanged += RefreshTexts;
+            BattleManager.Instance.OnMonsterDamaged += HandleMonsterDamaged;
         }
     }
 
@@ -167,14 +185,21 @@ public class BattleUI : MonoBehaviour
                 RuntimeBattleCard runtime = (bm != null && actualCardOrder < bm.CurrentHandCards.Count) ? bm.CurrentHandCards[actualCardOrder] : null;
                 BattleCardData cardData = runtime != null ? runtime.data : null;
 
-                if (cardData != null && RequiresEnemyTarget(cardData))
+                if (bm == null || cardData == null) return;
+                if (bm.CurrentMana < cardData.costMana)
+                {
+                    RefreshTexts();
+                    return;
+                }
+
+                if (RequiresEnemyTarget(cardData))
                 {
                     isAttackArmed = true;
                     RefreshTexts();
                     return;
                 }
 
-                bool used = bm != null && bm.TryUseCard(actualCardOrder, -1);
+                bool used = bm.TryUseCard(actualCardOrder, -1);
                 if (used)
                 {
                     isAttackArmed = false;
@@ -201,13 +226,9 @@ public class BattleUI : MonoBehaviour
             RuntimeBattleCard runtime = (bm != null && cardOrder < bm.CurrentHandCards.Count) ? bm.CurrentHandCards[cardOrder] : null;
             BattleCardData cardData = runtime != null ? runtime.data : null;
 
-            CharacterStats stats = bm != null ? (bm.characterStats != null ? bm.characterStats : CharacterStats.Instance) : CharacterStats.Instance;
-            int predictedHit = EstimateCardPrimaryHit(cardData, stats);
-
             bool used = bm != null && bm.TryUseCard(cardOrder, targetIndex);
             if (used)
             {
-                PlayMonsterHitFx(targetIndex, predictedHit);
                 isAttackArmed = false;
                 selectedCardOrder = -1;
                 selectedTargetIndex = -1;
@@ -223,6 +244,7 @@ public class BattleUI : MonoBehaviour
         {
             BattleManager.Instance.OnBattleStateChanged -= OnBattleStateChanged;
             BattleManager.Instance.OnBattleValuesChanged -= RefreshTexts;
+            BattleManager.Instance.OnMonsterDamaged -= HandleMonsterDamaged;
         }
     }
 
@@ -329,6 +351,7 @@ public class BattleUI : MonoBehaviour
             SetBg(battleField.gameObject, colorBattleField);
             BuildBattleFieldBackground();
             BuildMonsterContainer();
+            BuildBattleFieldNotice();
             BuildResultBanner();
         }
 
@@ -349,6 +372,17 @@ public class BattleUI : MonoBehaviour
 
         if (state == BattleState.BattleEnd)
             HideImmediate();
+
+        if (state == BattleState.RoundStart)
+        {
+            BattleManager bm = BattleManager.Instance;
+            int round = bm != null ? bm.RoundIndex : 0;
+            ShowBattleFieldNotice($"라운드 {round}", new Color(0.95f, 0.88f, 0.62f, 1f));
+        }
+        else if (state == BattleState.EnemyTurn)
+        {
+            ShowBattleFieldNotice("적 턴", new Color(1f, 0.78f, 0.42f, 1f));
+        }
 
         if (state != BattleState.PlayerTurn)
         {
@@ -381,13 +415,6 @@ public class BattleUI : MonoBehaviour
             if (leftDamageValueText != null)
                 leftDamageValueText.text = $"{stats.damagePer.FinalValue:0}%";
 
-            if (prevPlayerHP >= 0f)
-            {
-                float delta = stats.currentHP - prevPlayerHP;
-                if (delta < 0f)
-                    PlayPlayerHitFx(Mathf.FloorToInt(-delta));
-            }
-            prevPlayerHP = stats.currentHP;
         }
 
         int alive = 0;
@@ -569,6 +596,90 @@ public class BattleUI : MonoBehaviour
             : new Color(0.08f, 0.07f, 0.05f, 0.35f);
     }
 
+    private void BuildBattleFieldNotice()
+    {
+        if (battleField == null || battleFieldNoticeText != null) return;
+
+        GameObject go = new GameObject("BattleFieldNoticeText", typeof(RectTransform), typeof(Text));
+        go.transform.SetParent(battleField, false);
+
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.sizeDelta = new Vector2(520f, 96f);
+        rt.anchoredPosition = new Vector2(0f, 0f);
+
+        battleFieldNoticeText = go.GetComponent<Text>();
+        battleFieldNoticeText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        battleFieldNoticeText.alignment = TextAnchor.MiddleCenter;
+        battleFieldNoticeText.fontSize = 44;
+        battleFieldNoticeText.fontStyle = FontStyle.Bold;
+        battleFieldNoticeText.color = new Color(0.95f, 0.88f, 0.62f, 0f);
+        battleFieldNoticeText.enabled = false;
+    }
+
+    private void ShowBattleFieldNotice(string message, Color color)
+    {
+        if (battleFieldNoticeText == null)
+            BuildBattleFieldNotice();
+
+        if (battleFieldNoticeText == null) return;
+
+        if (battleFieldNoticeCoroutine != null)
+            StopCoroutine(battleFieldNoticeCoroutine);
+
+        battleFieldNoticeCoroutine = StartCoroutine(CoShowBattleFieldNotice(message, color));
+    }
+
+    private IEnumerator CoShowBattleFieldNotice(string message, Color color)
+    {
+        battleFieldNoticeText.enabled = true;
+        battleFieldNoticeText.text = message;
+
+        Color c = color;
+        c.a = 0f;
+        battleFieldNoticeText.color = c;
+
+        Vector2 basePos = new Vector2(0f, 4f);
+        RectTransform rt = battleFieldNoticeText.rectTransform;
+        rt.anchoredPosition = basePos;
+
+        float fadeIn = 0.16f;
+        float hold = 0.36f;
+        float fadeOut = 0.24f;
+
+        float t = 0f;
+        while (t < fadeIn)
+        {
+            t += Time.deltaTime;
+            float k = Mathf.Clamp01(t / fadeIn);
+            c.a = k;
+            battleFieldNoticeText.color = c;
+            rt.anchoredPosition = basePos + new Vector2(0f, 10f * k);
+            yield return null;
+        }
+
+        c.a = 1f;
+        battleFieldNoticeText.color = c;
+        yield return new WaitForSeconds(hold);
+
+        t = 0f;
+        while (t < fadeOut)
+        {
+            t += Time.deltaTime;
+            float k = Mathf.Clamp01(t / fadeOut);
+            c.a = 1f - k;
+            battleFieldNoticeText.color = c;
+            rt.anchoredPosition = basePos + new Vector2(0f, 10f + 8f * k);
+            yield return null;
+        }
+
+        battleFieldNoticeText.enabled = false;
+        battleFieldNoticeText.text = "";
+        battleFieldNoticeCoroutine = null;
+    }
+
     private void BuildResultBanner()
     {
         if (battleField == null || resultBannerText != null) return;
@@ -652,6 +763,7 @@ public class BattleUI : MonoBehaviour
         if (handArea == null) return;
 
         RectTransform hpBlock = EnsurePanel("HPBlock", handArea, new Color(0f, 0f, 0f, 0f));
+        hpBlockRoot = hpBlock;
         hpBlock.anchorMin = new Vector2(0f, 0f);
         hpBlock.anchorMax = new Vector2(0f, 1f);
         hpBlock.pivot = new Vector2(0f, 0.5f);
@@ -1005,13 +1117,14 @@ public class BattleUI : MonoBehaviour
             bool hover = (card == hoveredCard);
             bool focused = (i == focusIndex);
 
-            float scaleY = (selected || hover) ? 1.06f : 1f;
-            rt.localScale = new Vector3(1f, scaleY, 1f);
+            rt.localScale = Vector3.one;
 
             float x = startX + i * step;
             if (focusIndex >= 0 && i != focusIndex)
                 x += i < focusIndex ? -pushX : pushX;
-            rt.anchoredPosition = new Vector2(x, 0f);
+
+            float y = (selected || hover) ? 10f : 0f;
+            rt.anchoredPosition = new Vector2(x, y);
 
             rt.SetSiblingIndex(i);
             if (focused)
@@ -1219,6 +1332,8 @@ public class BattleUI : MonoBehaviour
         spawnedMonsterButtons.Clear();
         monsterButtonBgByIndex.Clear();
         monsterRootByIndex.Clear();
+        monsterPortraitByIndex.Clear();
+        monsterDamageNextTime.Clear();
         flashingMonsterIndices.Clear();
 
         BattleManager bm = BattleManager.Instance;
@@ -1318,13 +1433,9 @@ public class BattleUI : MonoBehaviour
                 RuntimeBattleCard runtime = (bmgr != null && cardOrder < bmgr.CurrentHandCards.Count) ? bmgr.CurrentHandCards[cardOrder] : null;
                 BattleCardData cardData = runtime != null ? runtime.data : null;
 
-                CharacterStats stats = bmgr != null ? (bmgr.characterStats != null ? bmgr.characterStats : CharacterStats.Instance) : CharacterStats.Instance;
-                int predictedHit = EstimateCardPrimaryHit(cardData, stats);
-
                 bool used = bmgr != null && bmgr.TryUseCard(cardOrder, targetIndex);
                 if (used)
                 {
-                    PlayMonsterHitFx(targetIndex, predictedHit);
                     isAttackArmed = false;
                     selectedCardOrder = -1;
                     selectedTargetIndex = -1;
@@ -1338,6 +1449,11 @@ public class BattleUI : MonoBehaviour
 
             RectTransform rootRT = go.GetComponent<RectTransform>();
             if (rootRT != null) monsterRootByIndex[targetIndex] = rootRT;
+            if (monsterUI != null && monsterUI.portraitImage != null)
+            {
+                RectTransform prt = monsterUI.portraitImage.rectTransform;
+                if (prt != null) monsterPortraitByIndex[targetIndex] = prt;
+            }
 
             Image bg = go.GetComponent<Image>();
             if (bg != null) monsterButtonBgByIndex[targetIndex] = bg;
@@ -1384,25 +1500,6 @@ public class BattleUI : MonoBehaviour
             else
                 bg.color = isAttackArmed ? colorMonsterTarget : colorMonsterNormal;
         }
-    }
-
-    private int EstimateCardPrimaryHit(BattleCardData card, CharacterStats stats)
-    {
-        if (card == null || stats == null) return 0;
-
-        var effects = card.GetEffects();
-        if (effects == null) return 0;
-
-        for (int i = 0; i < effects.Count; i++)
-        {
-            var e = effects[i];
-            if (e == null || e.effectType != BattleCardEffectType.Attack) continue;
-
-            int baseHit = BattleMath.CalcFinalDamage(stats.damageConst.FinalValue, stats.damagePer.FinalValue);
-            return Mathf.Max(0, Mathf.FloorToInt(baseHit * Mathf.Max(0f, e.attackMultiplier) + e.amount));
-        }
-
-        return 0;
     }
 
     private string BuildCardAutoDescription(BattleCardData card)
@@ -1502,23 +1599,126 @@ public class BattleUI : MonoBehaviour
             monsterItemPrefab.ValidateReferences(true);
     }
 
-    private void PlayMonsterHitFx(int targetIndex, int damage)
+    public IEnumerator PlayEnemyAttackFx(int monsterIndex, Action onImpact, int damage)
     {
+        if (!monsterRootByIndex.TryGetValue(monsterIndex, out RectTransform rt) || rt == null)
+        {
+            onImpact?.Invoke();
+            PlayPlayerHitFx(damage);
+            StartHitShake();
+            yield break;
+        }
+
+        Vector2 basePos = rt.anchoredPosition;
+        Vector2 hitPos = basePos + new Vector2(0f, -10f);
+
+        float speedMul = 1f + UnityEngine.Random.Range(-enemyAttackSpeedVariance, enemyAttackSpeedVariance);
+        speedMul = Mathf.Max(0.35f, speedMul);
+
+        float downDur = enemyAttackDownDuration / speedMul;
+        float holdDur = enemyAttackHoldDuration / speedMul;
+        float upDur = enemyAttackUpDuration / speedMul;
+
+        float t = 0f;
+        while (t < downDur)
+        {
+            t += Time.deltaTime;
+            float k = downDur > 0f ? Mathf.Clamp01(t / downDur) : 1f;
+            rt.anchoredPosition = Vector2.Lerp(basePos, hitPos, k);
+            yield return null;
+        }
+
+        rt.anchoredPosition = hitPos;
+        onImpact?.Invoke();
+        PlayPlayerHitFx(damage);
+        StartHitShake();
+
+        if (holdDur > 0f)
+            yield return new WaitForSeconds(holdDur);
+
+        t = 0f;
+        while (t < upDur)
+        {
+            t += Time.deltaTime;
+            float k = upDur > 0f ? Mathf.Clamp01(t / upDur) : 1f;
+            rt.anchoredPosition = Vector2.Lerp(hitPos, basePos, k);
+            yield return null;
+        }
+
+        rt.anchoredPosition = basePos;
+    }
+
+    private void HandleMonsterDamaged(int targetIndex, int damage)
+    {
+        if (damage <= 0) return;
+
         if (monsterButtonBgByIndex.TryGetValue(targetIndex, out Image bg) && bg != null)
             StartCoroutine(CoFlashMonster(targetIndex, bg));
 
-        if (monsterRootByIndex.TryGetValue(targetIndex, out RectTransform rt) && rt != null)
-            StartCoroutine(CoDamageFloat(rt, damage));
+        if (!monsterRootByIndex.TryGetValue(targetIndex, out RectTransform rt) || rt == null)
+            return;
+
+        RectTransform anchorRt = rt;
+        if (monsterPortraitByIndex.TryGetValue(targetIndex, out RectTransform portraitRt) && portraitRt != null)
+            anchorRt = portraitRt;
+
+        if (!TryResolveCanvasLocalFromRectCenter(anchorRt, out Vector2 localPos))
+            return;
+
+        localPos += monsterDamageTextOffset;
+
+        float now = Time.time;
+        float nextAt = monsterDamageNextTime.TryGetValue(targetIndex, out float queuedAt) ? queuedAt : now;
+        float delay = Mathf.Max(0f, nextAt - now);
+        monsterDamageNextTime[targetIndex] = now + delay + 0.06f;
+
+        StartCoroutine(CoDamageFloatDelayedOnCanvas(localPos, damage, delay));
+    }
+
+    private IEnumerator CoDamageFloatDelayedOnCanvas(Vector2 canvasLocalPos, int damage, float delay)
+    {
+        if (delay > 0f)
+            yield return new WaitForSeconds(delay);
+
+        yield return CoDamageFloatOnCanvas(canvasLocalPos, damage);
+    }
+
+    private bool TryResolveCanvasLocalFromRectCenter(RectTransform target, out Vector2 local)
+    {
+        local = Vector2.zero;
+        if (target == null) return false;
+
+        Canvas rootCanvas = GetComponentInParent<Canvas>();
+        if (rootCanvas == null) return false;
+
+        RectTransform canvasRT = rootCanvas.transform as RectTransform;
+        if (canvasRT == null) return false;
+
+        Camera cam = null;
+        if (rootCanvas.renderMode != RenderMode.ScreenSpaceOverlay)
+            cam = rootCanvas.worldCamera;
+
+        Vector3[] corners = new Vector3[4];
+        target.GetWorldCorners(corners);
+        Vector3 worldCenter = (corners[0] + corners[2]) * 0.5f;
+        Vector2 screenPoint = RectTransformUtility.WorldToScreenPoint(cam, worldCenter);
+
+        return RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRT, screenPoint, cam, out local);
     }
 
     private void PlayPlayerHitFx(int damage)
     {
-        if (leftHud != null)
+        if (handArea != null)
         {
-            Image bg = leftHud.GetComponent<Image>();
-            if (bg != null) StartCoroutine(CoFlashHud(bg, colorSideHud));
+            Image handBg = handArea.GetComponent<Image>();
+            if (handBg != null) StartCoroutine(CoFlashHud(handBg, colorHand));
+        }
 
-            StartCoroutine(CoDamageFloat(leftHud, damage));
+        if (hpBlockRoot != null)
+        {
+            Image hpBg = hpBlockRoot.GetComponent<Image>();
+            if (hpBg != null) StartCoroutine(CoFlashHud(hpBg, new Color(0f, 0f, 0f, 0f)));
+            StartCoroutine(CoDamageFloat(hpBlockRoot, damage));
         }
     }
 
@@ -1546,6 +1746,32 @@ public class BattleUI : MonoBehaviour
         bg.color = baseColor;
     }
 
+    private void StartHitShake()
+    {
+        if (battleField != null)
+            StartCoroutine(CoShakeRect(battleField, hitShakeDuration, hitShakeStrength));
+        if (handArea != null)
+            StartCoroutine(CoShakeRect(handArea, hitShakeDuration, hitShakeStrength * 0.5f));
+    }
+
+    private IEnumerator CoShakeRect(RectTransform rt, float duration, float strength)
+    {
+        if (rt == null || duration <= 0f || strength <= 0f) yield break;
+
+        Vector2 origin = rt.anchoredPosition;
+        float t = 0f;
+        while (t < duration)
+        {
+            t += Time.deltaTime;
+            float fade = 1f - Mathf.Clamp01(t / duration);
+            Vector2 offset = UnityEngine.Random.insideUnitCircle * strength * fade;
+            rt.anchoredPosition = origin + offset;
+            yield return null;
+        }
+
+        rt.anchoredPosition = origin;
+    }
+
     private IEnumerator CoDamageFloat(RectTransform target, int damage)
     {
         if (target == null) yield break;
@@ -1564,6 +1790,49 @@ public class BattleUI : MonoBehaviour
         t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         t.alignment = TextAnchor.MiddleCenter;
         t.fontSize = 20;
+        t.fontStyle = FontStyle.Bold;
+        t.color = new Color(1f, 0.40f, 0.40f, 1f);
+        t.text = $"-{Mathf.Max(0, damage)}";
+
+        float dur = 0.35f;
+        float elapsed = 0f;
+        Vector2 start = rt.anchoredPosition;
+
+        while (elapsed < dur)
+        {
+            elapsed += Time.deltaTime;
+            float k = Mathf.Clamp01(elapsed / dur);
+            rt.anchoredPosition = start + new Vector2(0f, 26f * k);
+            t.color = new Color(t.color.r, t.color.g, t.color.b, 1f - k * 0.9f);
+            yield return null;
+        }
+
+        if (go != null) Destroy(go);
+    }
+
+    private IEnumerator CoDamageFloatOnCanvas(Vector2 canvasLocalPos, int damage)
+    {
+        Canvas rootCanvas = GetComponentInParent<Canvas>();
+        if (rootCanvas == null) yield break;
+
+        RectTransform canvasRT = rootCanvas.transform as RectTransform;
+        if (canvasRT == null) yield break;
+
+        GameObject go = new GameObject("HitDamageText", typeof(RectTransform), typeof(Text));
+        go.transform.SetParent(canvasRT, false);
+
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = canvasLocalPos;
+        rt.sizeDelta = new Vector2(120f, 36f);
+        rt.SetAsLastSibling();
+
+        Text t = go.GetComponent<Text>();
+        t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        t.alignment = TextAnchor.MiddleCenter;
+        t.fontSize = 22;
         t.fontStyle = FontStyle.Bold;
         t.color = new Color(1f, 0.40f, 0.40f, 1f);
         t.text = $"-{Mathf.Max(0, damage)}";
