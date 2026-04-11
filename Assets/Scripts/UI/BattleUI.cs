@@ -99,8 +99,8 @@ public class BattleUI : MonoBehaviour
     [Min(0f)] public float monsterHitRecoilDownDuration = 0.10f;
     [Min(0f)] public float monsterHitRecoilDistance = 12f;
     [Range(0.5f, 1f)] public float monsterHitRecoilScale = 0.92f;
-    [Min(0f)] public float monsterHitEffectDuration = 0.18f;
-    [Min(0f)] public float monsterHitEffectScale = 1f;
+    [Min(0f)] public float monsterHitEffectDuration = 0.06f;
+    [Min(0f)] public float monsterHitEffectScale = 1.03f;
 
     private Text handHintText;
     private Text hpBlockText;
@@ -566,7 +566,6 @@ public class BattleUI : MonoBehaviour
             for (int i = 0; i < bm.Monsters.Count; i++)
             {
                 RuntimeMonster m = bm.Monsters[i];
-                h = h * 31 + (m != null ? m.currentHP : -1);
                 h = h * 31 + (m != null && m.IsDead ? 1 : 0);
                 h = h * 31 + (m != null && m.data != null ? m.data.GetInstanceID() : 0);
             }
@@ -1888,16 +1887,19 @@ public class BattleUI : MonoBehaviour
 
         float dur = Mathf.Max(0.01f, monsterHitEffectDuration);
         float elapsed = 0f;
-        Vector3 startScale = Vector3.one * monsterHitEffectScale * 0.9f;
-        Vector3 endScale = Vector3.one * monsterHitEffectScale * 1.08f;
+        Vector3 startScale = Vector3.one * monsterHitEffectScale * 0.96f;
+        Vector3 flashScale = Vector3.one * monsterHitEffectScale * 1.06f;
         rt.localScale = startScale;
 
         while (elapsed < dur)
         {
             elapsed += Time.deltaTime;
             float k = Mathf.Clamp01(elapsed / dur);
-            rt.localScale = Vector3.Lerp(startScale, endScale, k);
-            img.color = new Color(1f, 1f, 1f, 1f - k);
+            float scaleK = Mathf.Clamp01(k / 0.18f);
+            rt.localScale = Vector3.Lerp(startScale, flashScale, scaleK);
+
+            float alpha = k < 0.12f ? 1f : 1f - Mathf.Clamp01((k - 0.12f) / 0.88f);
+            img.color = new Color(1f, 1f, 1f, alpha);
             yield return null;
         }
 
