@@ -123,6 +123,9 @@ public class InventoryUI : MonoBehaviour
     {
         if (IsBattleBlockingInventory()) return;
 
+        if (StatPanelUI.Instance != null)
+            StatPanelUI.Instance.Hide();
+
         isVisible = true;
         Refresh();
         ShowImmediate();
@@ -154,8 +157,10 @@ public class InventoryUI : MonoBehaviour
         if (hintKeyText == null) return;
         if (isVisible)
             hintKeyText.text = "가방 닫기 [Tab]　　장비 장착/해제 [우클릭]　　아이템 버리기 [Ctrl+우클릭]";
+        else if (StatPanelUI.Instance != null && StatPanelUI.Instance.IsVisible)
+            hintKeyText.text = "능력치 닫기 [C]";
         else
-            hintKeyText.text = "가방 [Tab]";
+            hintKeyText.text = "가방 [Tab]    능력치 [C]";
     }
 
     // ────────────────────────────────────────────────────────
