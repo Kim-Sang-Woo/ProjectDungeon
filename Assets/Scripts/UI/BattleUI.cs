@@ -973,7 +973,7 @@ public class BattleUI : MonoBehaviour
             {
                 Image topImg = topBgT.GetComponent<Image>();
                 if (topImg != null)
-                    topImg.color = canUse ? new Color(0.08f, 0.08f, 0.08f, 1f) : new Color(0.02f, 0.02f, 0.02f, 1f);
+                    topImg.color = new Color(0f, 0f, 0f, 0f);
             }
 
             Transform descBgT = card.transform.Find("DescBg");
@@ -1189,7 +1189,7 @@ public class BattleUI : MonoBehaviour
         topBarRT.offsetMin = new Vector2(4f, -34f);
         topBarRT.offsetMax = new Vector2(-4f, -4f);
         Image topBarImg = topBarBg.GetComponent<Image>();
-        topBarImg.color = new Color(0.08f, 0.08f, 0.08f, 1f);
+        topBarImg.color = new Color(0f, 0f, 0f, 0f);
         topBarRT.SetSiblingIndex(0);
 
         Transform costBgT = card.transform.Find("CostBg");
