@@ -111,6 +111,8 @@ public class InventoryUI : MonoBehaviour
 
     private void Update()
     {
+        UpdateHintText();
+
         if (!Input.GetKeyDown(KeyCode.Tab)) return;
         if (IsBattleBlockingInventory()) return;
         Toggle();
@@ -154,13 +156,8 @@ public class InventoryUI : MonoBehaviour
 
     private void UpdateHintText()
     {
-        if (hintKeyText == null) return;
-        if (isVisible)
-            hintKeyText.text = "가방 닫기 [Tab]　　장비 장착/해제 [우클릭]　　아이템 버리기 [Ctrl+우클릭]";
-        else if (StatPanelUI.Instance != null && StatPanelUI.Instance.IsVisible)
-            hintKeyText.text = "능력치 닫기 [C]";
-        else
-            hintKeyText.text = "가방 [Tab]    능력치 [C]";
+        // 하단 공용 HintText(Canvas/InventoryHintUI)가 단일 소스로 문구를 관리한다.
+        // InventoryUI 내부 hintKeyText는 레이아웃 참조만 유지하고 내용은 여기서 덮어쓰지 않는다.
     }
 
     // ────────────────────────────────────────────────────────

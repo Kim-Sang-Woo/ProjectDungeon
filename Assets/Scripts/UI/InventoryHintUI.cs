@@ -11,17 +11,12 @@ using UnityEngine.UI;
 
 public class InventoryHintUI : MonoBehaviour
 {
+    private const string DefaultHintClosed = "가방 [Tab], 능력치 [C]";
+    private const string DefaultHintInventoryOpen = "가방 닫기 [Tab], 능력치 [C], 장착/해제 [우클릭], 버리기 [Ctrl+우클릭]";
+    private const string DefaultHintStatOpen = "가방 [Tab], 능력치 닫기 [C]";
+
     [Tooltip("힌트 텍스트 오브젝트")]
     public Text hintText;
-
-    [Tooltip("기본 힌트")]
-    public string hintClosed = "가방 [Tab]    능력치 [C]";
-
-    [Tooltip("가방 열린 상태 힌트")]
-    public string hintInventoryOpen = "가방 닫기 [Tab]    능력치 [C]";
-
-    [Tooltip("능력치 패널 열린 상태 힌트")]
-    public string hintStatOpen = "능력치 닫기 [C]";
 
     private bool isInventoryOpen;
     private bool isStatOpen;
@@ -41,7 +36,20 @@ public class InventoryHintUI : MonoBehaviour
             StatPanelUI.Instance.OnStatPanelToggled += HandleStatToggled;
 
         if (hintText != null)
-            hintText.text = hintClosed;
+            hintText.text = DefaultHintClosed;
+    }
+
+    private void Update()
+    {
+        bool inventoryVisible = InventoryUI.Instance != null && InventoryUI.Instance.canvasGroup != null && InventoryUI.Instance.canvasGroup.alpha > 0.01f;
+        bool statVisible = StatPanelUI.Instance != null && StatPanelUI.Instance.IsVisible;
+
+        if (inventoryVisible != isInventoryOpen || statVisible != isStatOpen)
+        {
+            isInventoryOpen = inventoryVisible;
+            isStatOpen = statVisible;
+            RefreshHint();
+        }
     }
 
     private void OnDestroy()
@@ -70,12 +78,16 @@ public class InventoryHintUI : MonoBehaviour
     {
         if (hintText == null) return;
 
-        if (isStatOpen)
-            hintText.text = hintStatOpen;
-        else if (isInventoryOpen)
-            hintText.text = hintInventoryOpen;
+        bool inventoryVisible = InventoryUI.Instance != null && InventoryUI.Instance.canvasGroup != null
+            && InventoryUI.Instance.canvasGroup.alpha > 0.01f && InventoryUI.Instance.canvasGroup.blocksRaycasts;
+        bool statVisible = StatPanelUI.Instance != null && StatPanelUI.Instance.IsVisible;
+
+        if (inventoryVisible)
+            hintText.text = DefaultHintInventoryOpen;
+        else if (statVisible)
+            hintText.text = DefaultHintStatOpen;
         else
-            hintText.text = hintClosed;
+            hintText.text = DefaultHintClosed;
     }
 
     private void EnsureStatPanelExists()
