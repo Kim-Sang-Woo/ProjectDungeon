@@ -65,6 +65,7 @@ public class BattleCardDataEditor : Editor
             SerializedProperty targetType = e.FindPropertyRelative("targetType");
             SerializedProperty attackMultiplier = e.FindPropertyRelative("attackMultiplier");
             SerializedProperty amount = e.FindPropertyRelative("amount");
+            SerializedProperty hitEffectSprite = e.FindPropertyRelative("hitEffectSprite");
 
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.BeginHorizontal();
@@ -94,7 +95,10 @@ public class BattleCardDataEditor : Editor
 
             BattleCardEffectType et = (BattleCardEffectType)effectType.enumValueIndex;
             if (et == BattleCardEffectType.Attack)
+            {
                 EditorGUILayout.PropertyField(attackMultiplier, new GUIContent("Attack Multiplier"));
+                EditorGUILayout.PropertyField(hitEffectSprite, new GUIContent("Hit Effect Sprite"));
+            }
 
             EditorGUILayout.PropertyField(amount, new GUIContent("Amount"));
             EditorGUILayout.EndVertical();
@@ -109,6 +113,7 @@ public class BattleCardDataEditor : Editor
             ne.FindPropertyRelative("targetType").enumValueIndex = (int)BattleCardTargetType.EnemySingle;
             ne.FindPropertyRelative("attackMultiplier").floatValue = 1f;
             ne.FindPropertyRelative("amount").floatValue = 0f;
+            ne.FindPropertyRelative("hitEffectSprite").objectReferenceValue = null;
         }
         GUI.enabled = true;
 

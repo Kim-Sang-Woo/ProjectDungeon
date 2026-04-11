@@ -33,6 +33,10 @@ public class BattleCardEffectEntry
 
     [Tooltip("효과 수치. Attack=추가 기본 피해, GainShield=방어 획득, Heal=회복, GainDodge=회피, GainMana=마나, GainDamagePer=피해%")]
     public float amount = 0f;
+
+    [Header("피격 연출")]
+    [Tooltip("Attack 효과 적중 시 재생할 피격 스프라이트")]
+    public Sprite hitEffectSprite;
 }
 
 [CreateAssetMenu(fileName = "BattleCard_New", menuName = "Battle/Battle Card Data")]
@@ -83,6 +87,7 @@ public class BattleCardData : ScriptableObject
             targetType = targetType,
             attackMultiplier = attackMultiplier,
             amount = amount,
+            hitEffectSprite = null,
         });
         return effects;
     }

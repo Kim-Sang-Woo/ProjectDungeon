@@ -80,7 +80,7 @@ public class BattleManager : MonoBehaviour
     public event Action OnBattleEnded;
     public event Action<bool> OnBattleFinished; // true=victory, false=defeat
     public event Action OnBattleValuesChanged;
-    public event Action<int, int> OnMonsterDamaged; // (monsterIndex, damage)
+    public event Action<int, int, Sprite> OnMonsterDamaged; // (monsterIndex, damage, hitEffectSprite)
     public event Action<string> OnSfxCue; // "round_start", "enemy_turn", "victory", "defeat", "attack", "enemy_hit"
 
     private const int MaxRoundHandCards = 10;
@@ -225,10 +225,11 @@ public class BattleManager : MonoBehaviour
 
                     if (e.targetType == BattleCardTargetType.EnemyAll)
                     {
-                        foreach (var m in Monsters)
+                        for (int i = 0; i < Monsters.Count; i++)
                         {
+                            RuntimeMonster m = Monsters[i];
                             if (m == null || m.IsDead) continue;
-                            ApplyDamageToMonster(m, damage);
+                            ApplyDamageToMonsterAt(i, damage, e.hitEffectSprite);
                             hitAny = true;
                         }
                     }
@@ -240,7 +241,7 @@ public class BattleManager : MonoBehaviour
                             if (i < 0 || i >= Monsters.Count) continue;
                             RuntimeMonster m = Monsters[i];
                             if (m == null || m.IsDead) continue;
-                            ApplyDamageToMonster(m, damage);
+                            ApplyDamageToMonsterAt(i, damage, e.hitEffectSprite);
                             hitAny = true;
                         }
                     }
@@ -260,7 +261,7 @@ public class BattleManager : MonoBehaviour
                             return false;
                         }
 
-                        ApplyDamageToMonster(target, damage);
+                        ApplyDamageToMonsterAt(targetIndex, damage, e.hitEffectSprite);
                         hitAny = true;
 
                         if (debugLog)
@@ -447,16 +448,17 @@ public class BattleManager : MonoBehaviour
         tempBattleDamagePerBonus = 0f;
     }
 
-    private void ApplyDamageToMonster(RuntimeMonster monster, int damage)
+    private void ApplyDamageToMonsterAt(int monsterIndex, int damage, Sprite hitEffectSprite = null)
     {
+        if (Monsters == null || monsterIndex < 0 || monsterIndex >= Monsters.Count) return;
+
+        RuntimeMonster monster = Monsters[monsterIndex];
         if (monster == null || monster.IsDead) return;
 
         int finalDamage = Mathf.Max(0, damage);
         monster.currentHP = Mathf.Max(0, monster.currentHP - finalDamage);
 
-        int idx = Monsters != null ? Monsters.IndexOf(monster) : -1;
-        if (idx >= 0)
-            OnMonsterDamaged?.Invoke(idx, finalDamage);
+        OnMonsterDamaged?.Invoke(monsterIndex, finalDamage, hitEffectSprite);
     }
 
     private System.Collections.IEnumerator ExecuteEnemyTurnSequential()

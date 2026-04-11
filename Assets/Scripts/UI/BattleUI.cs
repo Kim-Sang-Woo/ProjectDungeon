@@ -93,6 +93,15 @@ public class BattleUI : MonoBehaviour
     [Min(0f)] public float hitShakeStrength = 5f;
     public Vector2 monsterDamageTextOffset = Vector2.zero;
 
+    [Header("몬스터 피격 연출")]
+    [Min(0f)] public float monsterHitFlashDuration = 0.10f;
+    [Min(0f)] public float monsterHitRecoilUpDuration = 0.08f;
+    [Min(0f)] public float monsterHitRecoilDownDuration = 0.10f;
+    [Min(0f)] public float monsterHitRecoilDistance = 12f;
+    [Range(0.5f, 1f)] public float monsterHitRecoilScale = 0.92f;
+    [Min(0f)] public float monsterHitEffectDuration = 0.18f;
+    [Min(0f)] public float monsterHitEffectScale = 1f;
+
     private Text handHintText;
     private Text hpBlockText;
     private Text hpStatusText;
@@ -111,6 +120,7 @@ public class BattleUI : MonoBehaviour
     private readonly Dictionary<int, Image> monsterButtonBgByIndex = new Dictionary<int, Image>();
     private readonly Dictionary<int, RectTransform> monsterRootByIndex = new Dictionary<int, RectTransform>();
     private readonly Dictionary<int, RectTransform> monsterPortraitByIndex = new Dictionary<int, RectTransform>();
+    private readonly Dictionary<int, Image> monsterPortraitImageByIndex = new Dictionary<int, Image>();
     private readonly Dictionary<int, float> monsterDamageNextTime = new Dictionary<int, float>();
     private readonly HashSet<int> flashingMonsterIndices = new HashSet<int>();
     private readonly List<BattleCardItemUI> spawnedCards = new List<BattleCardItemUI>();
@@ -1336,6 +1346,7 @@ public class BattleUI : MonoBehaviour
         monsterButtonBgByIndex.Clear();
         monsterRootByIndex.Clear();
         monsterPortraitByIndex.Clear();
+        monsterPortraitImageByIndex.Clear();
         monsterDamageNextTime.Clear();
         flashingMonsterIndices.Clear();
 
@@ -1464,6 +1475,7 @@ public class BattleUI : MonoBehaviour
             {
                 RectTransform prt = monsterUI.portraitImage.rectTransform;
                 if (prt != null) monsterPortraitByIndex[targetIndex] = prt;
+                monsterPortraitImageByIndex[targetIndex] = monsterUI.portraitImage;
             }
 
             Image bg = go.GetComponent<Image>();
@@ -1659,19 +1671,25 @@ public class BattleUI : MonoBehaviour
         rt.anchoredPosition = basePos;
     }
 
-    private void HandleMonsterDamaged(int targetIndex, int damage)
+    private void HandleMonsterDamaged(int targetIndex, int damage, Sprite hitEffectSprite)
     {
         if (damage <= 0) return;
 
         if (monsterButtonBgByIndex.TryGetValue(targetIndex, out Image bg) && bg != null)
             StartCoroutine(CoFlashMonster(targetIndex, bg));
 
-        if (!monsterRootByIndex.TryGetValue(targetIndex, out RectTransform rt) || rt == null)
-            return;
+        if (monsterPortraitImageByIndex.TryGetValue(targetIndex, out Image portraitImage) && portraitImage != null)
+            StartCoroutine(CoFlashMonsterPortrait(portraitImage));
 
-        RectTransform anchorRt = rt;
+        if (monsterRootByIndex.TryGetValue(targetIndex, out RectTransform rootRt) && rootRt != null)
+            StartCoroutine(CoMonsterHitRecoil(rootRt, targetIndex));
+
+        RectTransform anchorRt = rootRt;
         if (monsterPortraitByIndex.TryGetValue(targetIndex, out RectTransform portraitRt) && portraitRt != null)
             anchorRt = portraitRt;
+
+        if (anchorRt == null)
+            return;
 
         if (!TryResolveCanvasLocalFromRectCenter(anchorRt, out Vector2 localPos))
             return;
@@ -1684,6 +1702,9 @@ public class BattleUI : MonoBehaviour
         monsterDamageNextTime[targetIndex] = now + delay + 0.06f;
 
         StartCoroutine(CoDamageFloatDelayedOnCanvas(localPos, damage, delay));
+
+        if (hitEffectSprite != null)
+            StartCoroutine(CoMonsterHitSprite(anchorRt, hitEffectSprite, delay));
     }
 
     private IEnumerator CoDamageFloatDelayedOnCanvas(Vector2 canvasLocalPos, int damage, float delay)
@@ -1737,13 +1758,12 @@ public class BattleUI : MonoBehaviour
     {
         flashingMonsterIndices.Add(targetIndex);
 
-        Color flash = new Color(1f, 0.55f, 0.55f, 1f);
+        Color flash = new Color(1f, 0.55f, 0.55f, 0.45f);
         bg.color = flash;
-        yield return new WaitForSeconds(0.1f);
+        yield return new WaitForSeconds(monsterHitFlashDuration);
 
         flashingMonsterIndices.Remove(targetIndex);
 
-        // 플래시 종료 후 현재 상태 기준 색으로 복구
         if (targetIndex == selectedTargetIndex)
             bg.color = colorMonsterSelected;
         else
@@ -1755,6 +1775,133 @@ public class BattleUI : MonoBehaviour
         bg.color = new Color(1f, 0.45f, 0.45f, 1f);
         yield return new WaitForSeconds(0.1f);
         bg.color = baseColor;
+    }
+
+    private IEnumerator CoFlashMonsterPortrait(Image portraitImage)
+    {
+        if (portraitImage == null) yield break;
+
+        Color baseColor = portraitImage.color;
+        portraitImage.color = new Color(1f, 0.45f, 0.45f, baseColor.a);
+        yield return new WaitForSeconds(monsterHitFlashDuration);
+
+        if (portraitImage != null)
+            portraitImage.color = baseColor;
+    }
+
+    private IEnumerator CoMonsterHitRecoil(RectTransform rootRt, int targetIndex)
+    {
+        if (rootRt == null) yield break;
+
+        RectTransform portraitRt = null;
+        monsterPortraitByIndex.TryGetValue(targetIndex, out portraitRt);
+
+        Vector2 rootBasePos = rootRt.anchoredPosition;
+        Vector3 rootBaseScale = rootRt.localScale;
+        Vector2 portraitBasePos = portraitRt != null ? portraitRt.anchoredPosition : Vector2.zero;
+        Vector3 portraitBaseScale = portraitRt != null ? portraitRt.localScale : Vector3.one;
+
+        Vector2 recoilOffset = new Vector2(0f, monsterHitRecoilDistance);
+        Vector3 recoilScale = new Vector3(monsterHitRecoilScale, monsterHitRecoilScale, 1f);
+
+        float upDur = Mathf.Max(0.001f, monsterHitRecoilUpDuration);
+        float downDur = Mathf.Max(0.001f, monsterHitRecoilDownDuration);
+
+        float t = 0f;
+        while (t < upDur)
+        {
+            t += Time.deltaTime;
+            float k = Mathf.Clamp01(t / upDur);
+            if (rootRt != null)
+            {
+                rootRt.anchoredPosition = Vector2.Lerp(rootBasePos, rootBasePos + recoilOffset, k);
+                rootRt.localScale = Vector3.Lerp(rootBaseScale, recoilScale, k);
+            }
+            if (portraitRt != null)
+            {
+                portraitRt.anchoredPosition = Vector2.Lerp(portraitBasePos, portraitBasePos + recoilOffset * 0.35f, k);
+                portraitRt.localScale = Vector3.Lerp(portraitBaseScale, recoilScale, k);
+            }
+            yield return null;
+        }
+
+        t = 0f;
+        while (t < downDur)
+        {
+            t += Time.deltaTime;
+            float k = Mathf.Clamp01(t / downDur);
+            if (rootRt != null)
+            {
+                rootRt.anchoredPosition = Vector2.Lerp(rootBasePos + recoilOffset, rootBasePos, k);
+                rootRt.localScale = Vector3.Lerp(recoilScale, rootBaseScale, k);
+            }
+            if (portraitRt != null)
+            {
+                portraitRt.anchoredPosition = Vector2.Lerp(portraitBasePos + recoilOffset * 0.35f, portraitBasePos, k);
+                portraitRt.localScale = Vector3.Lerp(recoilScale, portraitBaseScale, k);
+            }
+            yield return null;
+        }
+
+        if (rootRt != null)
+        {
+            rootRt.anchoredPosition = rootBasePos;
+            rootRt.localScale = rootBaseScale;
+        }
+        if (portraitRt != null)
+        {
+            portraitRt.anchoredPosition = portraitBasePos;
+            portraitRt.localScale = portraitBaseScale;
+        }
+    }
+
+    private IEnumerator CoMonsterHitSprite(RectTransform anchorRt, Sprite hitEffectSprite, float delay)
+    {
+        if (anchorRt == null || hitEffectSprite == null) yield break;
+        if (delay > 0f)
+            yield return new WaitForSeconds(delay);
+
+        Canvas rootCanvas = GetComponentInParent<Canvas>();
+        if (rootCanvas == null) yield break;
+
+        RectTransform canvasRT = rootCanvas.transform as RectTransform;
+        if (canvasRT == null) yield break;
+
+        if (!TryResolveCanvasLocalFromRectCenter(anchorRt, out Vector2 localPos))
+            yield break;
+
+        GameObject go = new GameObject("MonsterHitEffect", typeof(RectTransform), typeof(Image));
+        go.transform.SetParent(canvasRT, false);
+
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = localPos;
+        rt.sizeDelta = new Vector2(hitEffectSprite.rect.width, hitEffectSprite.rect.height) * monsterHitEffectScale;
+        rt.SetAsLastSibling();
+
+        Image img = go.GetComponent<Image>();
+        img.sprite = hitEffectSprite;
+        img.preserveAspect = true;
+        img.color = new Color(1f, 1f, 1f, 1f);
+
+        float dur = Mathf.Max(0.01f, monsterHitEffectDuration);
+        float elapsed = 0f;
+        Vector3 startScale = Vector3.one * monsterHitEffectScale * 0.9f;
+        Vector3 endScale = Vector3.one * monsterHitEffectScale * 1.08f;
+        rt.localScale = startScale;
+
+        while (elapsed < dur)
+        {
+            elapsed += Time.deltaTime;
+            float k = Mathf.Clamp01(elapsed / dur);
+            rt.localScale = Vector3.Lerp(startScale, endScale, k);
+            img.color = new Color(1f, 1f, 1f, 1f - k);
+            yield return null;
+        }
+
+        if (go != null) Destroy(go);
     }
 
     private void StartHitShake()
