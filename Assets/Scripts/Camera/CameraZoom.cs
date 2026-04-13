@@ -30,30 +30,46 @@ public class CameraZoom : MonoBehaviour
 
     private Camera cam;
     private float targetSize;
+    private float defaultSize;
+    private bool zoomEnabled = true;
 
     private void Awake()
     {
         cam        = GetComponent<Camera>();
         targetSize = cam.orthographicSize;
+        defaultSize = cam.orthographicSize;
     }
 
     private void Update()
     {
-        float scroll = Input.GetAxis("Mouse ScrollWheel");
-
-        if (scroll != 0f)
+        if (zoomEnabled)
         {
-            // 휠 업 → 축소값 감소(확대), 휠 다운 → 축소값 증가(축소)
-            targetSize -= scroll * zoomStep * (maxSize - minSize);
-            targetSize  = Mathf.Clamp(targetSize, minSize, maxSize);
+            float scroll = Input.GetAxis("Mouse ScrollWheel");
+
+            if (scroll != 0f)
+            {
+                targetSize -= scroll * zoomStep * (maxSize - minSize);
+                targetSize  = Mathf.Clamp(targetSize, minSize, maxSize);
+            }
         }
 
-        // 부드러운 보간
         cam.orthographicSize = Mathf.Lerp(
             cam.orthographicSize,
             targetSize,
             Time.deltaTime * zoomSpeed
         );
+    }
+
+    public void SetZoomEnabled(bool enabled)
+    {
+        zoomEnabled = enabled;
+    }
+
+    public void ResetToDefaultSize(bool immediate = false)
+    {
+        targetSize = Mathf.Clamp(defaultSize, minSize, maxSize);
+        if (immediate && cam != null)
+            cam.orthographicSize = targetSize;
     }
 
 #if UNITY_EDITOR

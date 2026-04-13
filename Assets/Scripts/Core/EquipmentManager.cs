@@ -37,6 +37,9 @@ public class EquipmentManager : MonoBehaviour
     [Header("초기 장비 (Start Equip)")]
     public List<StartEquipEntry> startEquips = new List<StartEquipEntry>();
 
+    [Header("초기 재화")]
+    [Min(0)] public int initialGold = 0;
+
     // 슬롯별 현재 장착 장비
     private Dictionary<EquipType, EquipData> equipped = new Dictionary<EquipType, EquipData>();
 
@@ -55,6 +58,8 @@ public class EquipmentManager : MonoBehaviour
         foreach (var entry in startEquips)
             if (entry.equip != null)
                 Equip(entry.equip);
+
+        GoldManager.Instance?.SetGold(initialGold);
     }
 
     // ─── 공개 API ───
@@ -176,6 +181,7 @@ public class EquipmentManager : MonoBehaviour
             ApplyStats(entry.equip, +1);
         }
 
+        GoldManager.Instance?.SetGold(initialGold);
         OnEquipChanged?.Invoke();
     }
 

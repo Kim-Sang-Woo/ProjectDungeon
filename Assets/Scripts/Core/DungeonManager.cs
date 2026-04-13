@@ -38,6 +38,9 @@ public class DungeonManager : MonoBehaviour
     [Tooltip("그리드 오버레이")]
     public GridOverlay gridOverlay;
 
+    [Tooltip("카메라 줌 제어")]
+    public CameraZoom cameraZoom;
+
     [Header("시작 화면")]
     [Tooltip("게임 시작 시 타이틀 화면을 먼저 표시한다")]
     public bool showTitleScreenOnStart = true;
@@ -94,6 +97,7 @@ public class DungeonManager : MonoBehaviour
         if (dungeonObjectSpawner == null) dungeonObjectSpawner = FindFirstObjectByType<DungeonObjectSpawner>();
         if (stairSystem == null) stairSystem = FindFirstObjectByType<StairSystem>();
         if (objectEventTrigger == null) objectEventTrigger = FindFirstObjectByType<ObjectEventTrigger>();
+        if (cameraZoom == null) cameraZoom = FindFirstObjectByType<CameraZoom>();
 
         if (titleScreenUI == null)
         {
@@ -117,6 +121,8 @@ public class DungeonManager : MonoBehaviour
 
         if (TownStorageManager.Instance == null)
             new GameObject("TownStorageManager", typeof(TownStorageManager));
+        if (GoldManager.Instance == null)
+            new GameObject("GoldManager", typeof(GoldManager));
     }
 
     private void Start()
@@ -231,6 +237,7 @@ public class DungeonManager : MonoBehaviour
         ClearDungeonCache();
         GenerateAndLoadFloor(0, true);
         fogOfWar?.ResetAllFogState();
+        cameraZoom?.ResetToDefaultSize(true);
         SetDungeonVisualsActive(true);
         CurrentPresentationMode = DungeonPresentationMode.Dungeon;
 
@@ -338,6 +345,7 @@ public class DungeonManager : MonoBehaviour
     public void ReturnToTownSpawn()
     {
         Debug.Log($"[DungeonManager] 마을 복귀: {CurrentFloorIndex}층 -> Town");
+        MerchantInventoryManager.Instance?.RefreshStock();
         EnterTownMode();
     }
 

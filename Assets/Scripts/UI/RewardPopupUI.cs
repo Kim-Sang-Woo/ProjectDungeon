@@ -5,10 +5,12 @@ using UnityEngine.EventSystems;
 
 public class RewardPopupUI : MonoBehaviour
 {
+    public static RewardPopupUI Instance { get; private set; }
     public enum PanelMode
     {
         Reward,
-        Storage
+        Storage,
+        Merchant
     }
 
     [Header("레이아웃")]
@@ -54,11 +56,21 @@ public class RewardPopupUI : MonoBehaviour
     private PanelMode currentMode = PanelMode.Reward;
     private TownStorageManager storageManager;
     private TownStorageManager subscribedStorageManager;
+    private MerchantInventoryManager merchantManager;
+    private MerchantInventoryManager subscribedMerchantManager;
+    private RectTransform headerRT;
+    private bool isDragging;
+    private int dragSourceIndex = -1;
+    private Image dragIconImage;
+    private RectTransform dragIconRect;
+    private Canvas rootCanvas;
 
     private int SlotCount => Mathf.Max(1, currentCols * currentRows);
 
     private void Awake()
     {
+        if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+        Instance = this;
         gameObject.SetActive(false);
     }
 
@@ -87,6 +99,7 @@ public class RewardPopupUI : MonoBehaviour
         if (!TryGetComponent(out popupRaycaster))
             popupRaycaster = gameObject.AddComponent<GraphicRaycaster>();
 
+        rootCanvas = popupCanvas;
         SetBg(gameObject, colorPanelBg);
         RebuildPanel();
     }
@@ -106,6 +119,7 @@ public class RewardPopupUI : MonoBehaviour
         panelRT.anchoredPosition = Vector2.zero;
 
         GameObject header = MakeBlock("Header", panelRT, 0f, headerHeight, colorHeaderBg);
+        headerRT = header.GetComponent<RectTransform>();
         titleText = MakeText(header, "TitleText",
             new Vector2(0f, 0f), new Vector2(0.75f, 1f),
             new Vector4(paddingH, 0f, 0f, 0f),
@@ -192,6 +206,7 @@ public class RewardPopupUI : MonoBehaviour
             slots.Add(state);
 
             int idx = i;
+            AddStorageSlotDragHandlers(go, idx);
             AddRightClickHandler(go, () => OnSlotRightClick(idx));
             AddHoverHandler(go, idx);
         }
@@ -227,6 +242,7 @@ public class RewardPopupUI : MonoBehaviour
     public void ShowStorage(string header, TownStorageManager manager, int columns, int rows, bool hideCloseButton)
     {
         UnsubscribeStorageEvents();
+        UnsubscribeMerchantEvents();
         currentMode = PanelMode.Storage;
         currentCols = Mathf.Max(1, columns);
         currentRows = Mathf.Max(1, rows);
@@ -250,6 +266,33 @@ public class RewardPopupUI : MonoBehaviour
         RefreshStorageView();
     }
 
+    public void ShowMerchant(string header, MerchantInventoryManager manager, int columns, int rows, bool hideCloseButton)
+    {
+        UnsubscribeStorageEvents();
+        UnsubscribeMerchantEvents();
+        currentMode = PanelMode.Merchant;
+        currentCols = Mathf.Max(1, columns);
+        currentRows = Mathf.Max(1, rows);
+        merchantManager = manager;
+        subscribedMerchantManager = manager;
+        if (subscribedMerchantManager != null)
+            subscribedMerchantManager.OnMerchantInventoryChanged += RefreshMerchantView;
+
+        EnsureInitialized();
+        RebuildPanel();
+        gameObject.SetActive(true);
+        transform.SetAsLastSibling();
+
+        if (titleText != null)
+            titleText.text = string.IsNullOrEmpty(header) ? "상점" : header;
+        if (hintText != null)
+            hintText.text = "구매/판매 [우클릭]";
+        if (closeButton != null)
+            closeButton.gameObject.SetActive(!hideCloseButton);
+
+        RefreshMerchantView();
+    }
+
     public void RefreshStorageView()
     {
         if (currentMode != PanelMode.Storage) return;
@@ -264,12 +307,55 @@ public class RewardPopupUI : MonoBehaviour
         UpdateFooterCount();
     }
 
+    public void RefreshMerchantView()
+    {
+        if (currentMode != PanelMode.Merchant) return;
+
+        ClearSlots();
+        if (merchantManager != null)
+        {
+            var entries = merchantManager.Slots;
+            for (int i = 0; i < entries.Count && i < slots.Count; i++)
+                SetItem(i, entries[i].item, entries[i].quantity);
+        }
+        UpdateFooterCount();
+    }
+
     public void Close()
     {
         UnsubscribeStorageEvents();
+        UnsubscribeMerchantEvents();
+        CancelStorageDrag();
         ItemTooltipUI.Instance?.Hide();
         ClearSlots();
         gameObject.SetActive(false);
+    }
+
+    public bool CanAcceptInventoryDrag(PointerEventData eventData)
+    {
+        return currentMode == PanelMode.Storage && gameObject.activeInHierarchy && GetStorageDropSlotIndex(eventData) >= 0;
+    }
+
+    public bool TryStoreFromInventoryDrag(int inventoryIndex, PointerEventData eventData)
+    {
+        if (currentMode != PanelMode.Storage || storageManager == null || Inventory.Instance == null) return false;
+        if (inventoryIndex < 0 || inventoryIndex >= Inventory.Instance.CurrentItemCount) return false;
+        if (GetStorageDropSlotIndex(eventData) < 0) return false;
+
+        InventorySlot slot = Inventory.Instance.Slots[inventoryIndex];
+        if (slot == null || slot.item == null || slot.quantity <= 0) return false;
+
+        if (!storageManager.TryStore(slot.item, slot.quantity))
+        {
+            FloatingTextUI.Instance?.Show("보관함이 가득 찼습니다.", FloatingTextUI.ColorFail);
+            return true;
+        }
+
+        ItemTooltipUI.Instance?.Hide();
+        FloatingTextUI.Instance?.Show($"{slot.item.itemName} ×{slot.quantity} 보관", FloatingTextUI.ColorAcquire);
+        Inventory.Instance.RemoveAt(inventoryIndex);
+        RefreshStorageView();
+        return true;
     }
 
     private void SetItem(int index, ItemData item, int qty)
@@ -317,6 +403,68 @@ public class RewardPopupUI : MonoBehaviour
         if (img != null) img.color = color;
     }
 
+    private int GetStorageDropSlotIndex(PointerEventData eventData)
+    {
+        if (eventData == null || currentMode != PanelMode.Storage) return -1;
+
+        List<RaycastResult> results = new List<RaycastResult>();
+        EventSystem.current?.RaycastAll(eventData, results);
+        foreach (var r in results)
+        {
+            if (r.gameObject == null) continue;
+            int raycastIndex = GetStorageSlotIndexFromObject(r.gameObject);
+            if (raycastIndex >= 0)
+                return raycastIndex;
+        }
+
+        if (gridRT == null) return -1;
+
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                gridRT,
+                eventData.position,
+                eventData.pressEventCamera,
+                out Vector2 local))
+        {
+            float width = gridRT.rect.width;
+            float ox = local.x + width * 0.5f - paddingH;
+            float oy = -local.y - paddingV;
+
+            float pitchX = slotSize + slotSpacing;
+            float pitchY = slotSize + slotSpacing;
+
+            int col = Mathf.FloorToInt(ox / pitchX);
+            int row = Mathf.FloorToInt(oy / pitchY);
+            if (col >= 0 && col < currentCols && row >= 0 && row < currentRows)
+            {
+                int index = row * currentCols + col;
+                if (index >= 0 && index < SlotCount)
+                    return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private int GetStorageSlotIndexFromObject(GameObject go)
+    {
+        if (go == null) return -1;
+
+        Transform t = go.transform;
+        while (t != null)
+        {
+            string n = t.gameObject.name;
+            if (!string.IsNullOrEmpty(n) && n.StartsWith("RewardSlot_"))
+            {
+                string suffix = n.Substring("RewardSlot_".Length);
+                if (int.TryParse(suffix, out int index) && index >= 0 && index < SlotCount)
+                    return index;
+            }
+            t = t.parent;
+        }
+
+        return -1;
+    }
+
     private void AddHoverHandler(GameObject go, int idx)
     {
         EventTrigger trigger = go.GetComponent<EventTrigger>() ?? go.AddComponent<EventTrigger>();
@@ -326,7 +474,8 @@ public class RewardPopupUI : MonoBehaviour
         {
             if (idx < 0 || idx >= slots.Count || slots[idx].item == null) return;
             RectTransform rt = slots[idx].root.GetComponent<RectTransform>();
-            ItemTooltipUI.Instance?.ShowForItem(slots[idx].item, slots[idx].quantity, rt);
+            int priceMultiplier = currentMode == PanelMode.Merchant ? 2 : 1;
+            ItemTooltipUI.Instance?.ShowForItem(slots[idx].item, slots[idx].quantity, rt, priceMultiplier);
         });
         trigger.triggers.Add(enter);
 
@@ -344,6 +493,33 @@ public class RewardPopupUI : MonoBehaviour
         if (Inventory.Instance == null)
         {
             Debug.LogWarning("[RewardPopupUI] Inventory null");
+            return;
+        }
+
+        if (currentMode == PanelMode.Merchant && merchantManager != null)
+        {
+            int buyPrice = item.price * 2 * Mathf.Max(1, qty);
+            if (GoldManager.Instance == null || !GoldManager.Instance.TrySpendGold(buyPrice))
+            {
+                FloatingTextUI.Instance?.Show("골드가 부족합니다.", FloatingTextUI.ColorFail);
+                return;
+            }
+
+            switch (Inventory.Instance.AddItem(item, qty))
+            {
+                case AddItemResult.Success:
+                    merchantManager.RemoveAt(idx);
+                    FloatingTextUI.Instance?.Show($"{item.itemName} ×{qty} 구매", FloatingTextUI.ColorAcquire);
+                    break;
+                case AddItemResult.FailSlotFull:
+                    GoldManager.Instance?.AddGold(buyPrice);
+                    FloatingTextUI.Instance?.Show("인벤토리가 가득 찼습니다.", FloatingTextUI.ColorFail);
+                    break;
+                case AddItemResult.FailTooHeavy:
+                    GoldManager.Instance?.AddGold(buyPrice);
+                    FloatingTextUI.Instance?.Show("너무 무겁습니다.", FloatingTextUI.ColorFail);
+                    break;
+            }
             return;
         }
 
@@ -384,6 +560,72 @@ public class RewardPopupUI : MonoBehaviour
     {
         if (itemCountText == null) return;
         itemCountText.text = $"{GetFilledCount()} / {slots.Count}";
+    }
+
+    private void BeginStorageDrag(int slotIndex, PointerEventData eventData)
+    {
+        if (currentMode != PanelMode.Storage) return;
+        if (slotIndex < 0 || slotIndex >= slots.Count) return;
+        if (slots[slotIndex].item == null) return;
+
+        isDragging = true;
+        dragSourceIndex = slotIndex;
+        ItemTooltipUI.Instance?.Hide();
+        EnsureDragIcon();
+
+        if (dragIconImage != null)
+        {
+            dragIconImage.enabled = true;
+            dragIconImage.sprite = slots[slotIndex].item.icon;
+            dragIconImage.color = slots[slotIndex].item.icon != null ? Color.white : new Color(1f, 1f, 1f, 0.6f);
+        }
+
+        UpdateStorageDrag(eventData);
+    }
+
+    private void UpdateStorageDrag(PointerEventData eventData)
+    {
+        if (!isDragging || dragIconRect == null || rootCanvas == null) return;
+
+        RectTransform canvasRect = rootCanvas.transform as RectTransform;
+        if (canvasRect == null) return;
+
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRect, eventData.position, eventData.pressEventCamera, out Vector2 localPos))
+            dragIconRect.anchoredPosition = localPos;
+    }
+
+    private void EndStorageDrag(PointerEventData eventData)
+    {
+        if (!isDragging) return;
+
+        bool handled = false;
+        if (InventoryUI.Instance != null)
+            handled = InventoryUI.Instance.TryHandleStorageDrop(dragSourceIndex, eventData);
+
+        if (!handled)
+            CancelStorageDrag();
+        else
+        {
+            isDragging = false;
+            dragSourceIndex = -1;
+            FinishStorageDragVisual();
+        }
+    }
+
+    private void CancelStorageDrag()
+    {
+        isDragging = false;
+        dragSourceIndex = -1;
+        FinishStorageDragVisual();
+    }
+
+    private void FinishStorageDragVisual()
+    {
+        if (dragIconImage != null)
+        {
+            dragIconImage.enabled = false;
+            dragIconImage.sprite = null;
+        }
     }
 
     private GameObject MakeBlock(string name, RectTransform parent, float offsetFromTop, float height, Color bgColor)
@@ -445,6 +687,38 @@ public class RewardPopupUI : MonoBehaviour
         img.color = color;
     }
 
+    private void AddStorageSlotDragHandlers(GameObject go, int idx)
+    {
+        EventTrigger trigger = go.GetComponent<EventTrigger>() ?? go.AddComponent<EventTrigger>();
+
+        var beginDrag = new EventTrigger.Entry { eventID = EventTriggerType.BeginDrag };
+        beginDrag.callback.AddListener(evt =>
+        {
+            var pe = evt as PointerEventData;
+            if (pe != null && pe.button == PointerEventData.InputButton.Left)
+                BeginStorageDrag(idx, pe);
+        });
+        trigger.triggers.Add(beginDrag);
+
+        var drag = new EventTrigger.Entry { eventID = EventTriggerType.Drag };
+        drag.callback.AddListener(evt =>
+        {
+            var pe = evt as PointerEventData;
+            if (pe != null)
+                UpdateStorageDrag(pe);
+        });
+        trigger.triggers.Add(drag);
+
+        var endDrag = new EventTrigger.Entry { eventID = EventTriggerType.EndDrag };
+        endDrag.callback.AddListener(evt =>
+        {
+            var pe = evt as PointerEventData;
+            if (pe != null)
+                EndStorageDrag(pe);
+        });
+        trigger.triggers.Add(endDrag);
+    }
+
     private void AddRightClickHandler(GameObject go, System.Action onRightClick)
     {
         EventTrigger trigger = go.GetComponent<EventTrigger>() ?? go.AddComponent<EventTrigger>();
@@ -457,12 +731,39 @@ public class RewardPopupUI : MonoBehaviour
         trigger.triggers.Add(entry);
     }
 
+    private void EnsureDragIcon()
+    {
+        if (dragIconImage != null) return;
+        if (rootCanvas == null) rootCanvas = GetComponentInParent<Canvas>();
+        if (rootCanvas == null) return;
+
+        GameObject go = new GameObject("DraggedStorageItemIcon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        go.transform.SetParent(rootCanvas.transform, false);
+
+        dragIconRect = go.GetComponent<RectTransform>();
+        dragIconRect.sizeDelta = new Vector2(slotSize, slotSize);
+
+        dragIconImage = go.GetComponent<Image>();
+        dragIconImage.raycastTarget = false;
+        dragIconImage.preserveAspect = true;
+        dragIconImage.enabled = false;
+    }
+
     private void UnsubscribeStorageEvents()
     {
         if (subscribedStorageManager != null)
         {
             subscribedStorageManager.OnStorageChanged -= RefreshStorageView;
             subscribedStorageManager = null;
+        }
+    }
+
+    private void UnsubscribeMerchantEvents()
+    {
+        if (subscribedMerchantManager != null)
+        {
+            subscribedMerchantManager.OnMerchantInventoryChanged -= RefreshMerchantView;
+            subscribedMerchantManager = null;
         }
     }
 }

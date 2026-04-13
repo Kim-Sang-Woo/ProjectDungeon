@@ -76,6 +76,7 @@ public class InventoryUI : MonoBehaviour
     private RectTransform  dragIconRect;
     private Canvas         rootCanvas;
     private bool           forceOpenForTownStorage;
+    private bool           forceOpenForTownMerchant;
 
     /// <summary>가방 열림/닫힘 시 발신 — true=열림, false=닫힘</summary>
     public event System.Action<bool> OnInventoryToggled;
@@ -140,6 +141,7 @@ public class InventoryUI : MonoBehaviour
     public void SetTownStorageForcedOpen(bool forced)
     {
         forceOpenForTownStorage = forced;
+        if (forced) forceOpenForTownMerchant = false;
 
         if (forced)
         {
@@ -152,14 +154,35 @@ public class InventoryUI : MonoBehaviour
         else
         {
             forceOpenForTownStorage = false;
-            if (isVisible)
+            if (isVisible && !forceOpenForTownMerchant)
+                Hide();
+        }
+    }
+
+    public void SetTownMerchantForcedOpen(bool forced)
+    {
+        forceOpenForTownMerchant = forced;
+        if (forced) forceOpenForTownStorage = false;
+
+        if (forced)
+        {
+            isVisible = true;
+            Refresh();
+            ShowImmediate();
+            UpdateHintText();
+            OnInventoryToggled?.Invoke(true);
+        }
+        else
+        {
+            forceOpenForTownMerchant = false;
+            if (isVisible && !forceOpenForTownStorage)
                 Hide();
         }
     }
 
     public void Hide()
     {
-        if (forceOpenForTownStorage) return;
+        if (forceOpenForTownStorage || forceOpenForTownMerchant) return;
 
         isVisible = false;
         isDragging = false;
@@ -498,6 +521,15 @@ public class InventoryUI : MonoBehaviour
             return;
         }
 
+        if (forceOpenForTownMerchant)
+        {
+            tooltipUI?.Hide();
+            GoldManager.Instance?.AddGold(slot.item.price * slot.quantity);
+            FloatingTextUI.Instance?.Show($"{slot.item.itemName} ×{slot.quantity} 판매", FloatingTextUI.ColorAcquire);
+            Inventory.Instance?.RemoveAt(index);
+            return;
+        }
+
         EquipData equip = slot.item as EquipData;
         if (equip == null) return;
         tooltipUI?.Hide();
@@ -508,7 +540,7 @@ public class InventoryUI : MonoBehaviour
     private void OnCtrlRightClick(InventorySlot slot, int index)
     {
         if (slot == null) return;
-        if (forceOpenForTownStorage) return;
+        if (forceOpenForTownStorage || forceOpenForTownMerchant) return;
         tooltipUI?.Hide();
         Inventory.Instance?.RemoveAt(index);
         if (debugLogs) Debug.Log($"[InventoryUI] 아이템 버리기: {slot.item.itemName}");
@@ -558,6 +590,9 @@ public class InventoryUI : MonoBehaviour
         if (!isDragging) return;
 
         bool handled = TryDropToEquipSlot(eventData);
+
+        if (!handled && RewardPopupUI.Instance != null)
+            handled = RewardPopupUI.Instance.TryStoreFromInventoryDrag(dragSourceIndex, eventData);
 
         if (!handled)
         {
@@ -706,6 +741,36 @@ public class InventoryUI : MonoBehaviour
         Inventory inv = Inventory.Instance;
         if (inv != null && slotIndex < inv.CurrentItemCount) return colorFilled;
         return colorEmpty;
+    }
+
+    public bool TryHandleStorageDrop(int storageIndex, PointerEventData eventData)
+    {
+        if (eventData == null || itemGrid == null) return false;
+        if (!forceOpenForTownStorage) return false;
+        if (TownStorageManager.Instance == null || storageIndex < 0 || storageIndex >= TownStorageManager.Instance.Slots.Count) return false;
+
+        int targetIndex = dragTargetIndex >= 0 ? dragTargetIndex : GetDropTargetIndex(eventData);
+        if (targetIndex < 0) return false;
+
+        TownStorageSlot storageSlot = TownStorageManager.Instance.Slots[storageIndex];
+        if (storageSlot == null || storageSlot.item == null || storageSlot.quantity <= 0) return false;
+
+        switch (Inventory.Instance.AddItem(storageSlot.item, storageSlot.quantity))
+        {
+            case AddItemResult.Success:
+                tooltipUI?.Hide();
+                FloatingTextUI.Instance?.Show($"{storageSlot.item.itemName} ×{storageSlot.quantity} 획득", FloatingTextUI.ColorAcquire);
+                TownStorageManager.Instance.RemoveAt(storageIndex);
+                return true;
+            case AddItemResult.FailSlotFull:
+                FloatingTextUI.Instance?.Show("인벤토리가 가득 찼습니다.", FloatingTextUI.ColorFail);
+                return true;
+            case AddItemResult.FailTooHeavy:
+                FloatingTextUI.Instance?.Show("너무 무겁습니다.", FloatingTextUI.ColorFail);
+                return true;
+        }
+
+        return false;
     }
 
     private bool IsBattleBlockingInventory()

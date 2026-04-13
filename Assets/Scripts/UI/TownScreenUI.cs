@@ -30,6 +30,8 @@ public class TownScreenUI : MonoBehaviour
     private Font uiFont;
     private RewardPopupUI storagePopupUI;
     private Image backgroundImage;
+    private Image goldIconImage;
+    private Text goldValueText;
     private Button dungeonButton;
     private Button storageButton;
     private Button merchantButton;
@@ -51,6 +53,18 @@ public class TownScreenUI : MonoBehaviour
     private readonly Color colorEnterTop = new Color(0.23f, 0.17f, 0.06f, 1f);
     private readonly Color colorEnterBottom = new Color(0.14f, 0.10f, 0.03f, 1f);
 
+    private void OnEnable()
+    {
+        if (GoldManager.Instance != null)
+            GoldManager.Instance.OnGoldChanged += HandleGoldChanged;
+    }
+
+    private void OnDisable()
+    {
+        if (GoldManager.Instance != null)
+            GoldManager.Instance.OnGoldChanged -= HandleGoldChanged;
+    }
+
     private void Awake()
     {
         BuildIfNeeded();
@@ -70,6 +84,7 @@ public class TownScreenUI : MonoBehaviour
         }
 
         SetPage(TownPage.Dungeon);
+        RefreshGoldUI();
 
         canvasGroup.alpha = 1f;
         canvasGroup.blocksRaycasts = true;
@@ -80,6 +95,7 @@ public class TownScreenUI : MonoBehaviour
     public void HideImmediate()
     {
         ExitStorageMode();
+        ExitMerchantMode();
         if (canvasGroup == null) return;
         canvasGroup.alpha = 0f;
         canvasGroup.blocksRaycasts = false;
@@ -88,6 +104,8 @@ public class TownScreenUI : MonoBehaviour
 
     public void SetPage(TownPage page)
     {
+        ExitStorageMode();
+        ExitMerchantMode();
         currentPage = page;
 
         if (backgroundImage != null)
@@ -106,8 +124,8 @@ public class TownScreenUI : MonoBehaviour
 
         if (page == TownPage.Storage)
             EnterStorageMode();
-        else
-            ExitStorageMode();
+        else if (page == TownPage.Merchant)
+            EnterMerchantMode();
     }
 
     private Sprite GetPageSprite(TownPage page)
@@ -123,6 +141,7 @@ public class TownScreenUI : MonoBehaviour
     private void HandleEnterDungeon()
     {
         ExitStorageMode();
+        ExitMerchantMode();
         dungeonManager?.BeginFreshDungeonRunFromTown();
     }
 
@@ -151,6 +170,48 @@ public class TownScreenUI : MonoBehaviour
     {
         InventoryUI.Instance?.SetTownStorageForcedOpen(false);
         storagePopupUI?.Close();
+    }
+
+    private void EnterMerchantMode()
+    {
+        InventoryUI.Instance?.SetTownMerchantForcedOpen(true);
+
+        storagePopupUI = null;
+        if (RewardManager.Instance != null && RewardManager.Instance.popupUI != null)
+            storagePopupUI = RewardManager.Instance.popupUI;
+        if (storagePopupUI == null)
+            storagePopupUI = FindFirstObjectByType<RewardPopupUI>(FindObjectsInactive.Include);
+
+        MerchantInventoryManager merchantManager = MerchantInventoryManager.Instance;
+        if (merchantManager == null)
+            merchantManager = FindFirstObjectByType<MerchantInventoryManager>(FindObjectsInactive.Include);
+
+        merchantManager?.EnsureStockReady();
+
+        if (storagePopupUI != null && merchantManager != null)
+        {
+            storagePopupUI.ShowMerchant("상점", merchantManager, merchantManager.columns, merchantManager.rows, true);
+            storagePopupUI.transform.SetAsLastSibling();
+        }
+        else if (merchantManager == null)
+        {
+            Debug.LogError("[TownScreenUI] MerchantInventoryManager를 찾지 못해 상점 패널을 열 수 없습니다.");
+        }
+        else
+        {
+            Debug.LogError("[TownScreenUI] RewardPopupUI를 찾지 못해 상점 패널을 열 수 없습니다.");
+        }
+    }
+
+    private void ExitMerchantMode()
+    {
+        InventoryUI.Instance?.SetTownMerchantForcedOpen(false);
+        storagePopupUI?.Close();
+    }
+
+    private void HandleGoldChanged(int amount)
+    {
+        RefreshGoldUI();
     }
 
     private void BuildIfNeeded()
@@ -221,6 +282,8 @@ public class TownScreenUI : MonoBehaviour
         storageButton = CreateNavButton(navGroup.transform, storageLabel, out storageButtonText, () => SetPage(TownPage.Storage));
         merchantButton = CreateNavButton(navGroup.transform, merchantLabel, out merchantButtonText, () => SetPage(TownPage.Merchant));
 
+        BuildGoldDisplay(topBar);
+
         RectTransform enterWrap = CreateRect("EnterButtonWrap", root, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-300f, 32f), new Vector2(-32f, 96f));
         enterWrap.pivot = new Vector2(1f, 0f);
         enterDungeonWrap = enterWrap;
@@ -262,6 +325,7 @@ public class TownScreenUI : MonoBehaviour
         enterTextRt.offsetMax = new Vector2(-12f, 0f);
 
         SetPage(TownPage.Dungeon);
+        RefreshGoldUI();
         isBuilt = true;
     }
 
@@ -320,6 +384,35 @@ public class TownScreenUI : MonoBehaviour
         label.color = active ? colorAccent : colorTextDim;
         Transform line = label.transform.parent.Find("ActiveLine");
         if (line != null) line.gameObject.SetActive(active);
+    }
+
+    private void BuildGoldDisplay(RectTransform topBar)
+    {
+        RectTransform goldRoot = CreateRect("GoldDisplay", topBar, new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(-180f, 0f), new Vector2(-20f, 0f));
+        goldRoot.pivot = new Vector2(1f, 0.5f);
+
+        RectTransform iconRt = CreateRect("GoldIcon", goldRoot, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(0f, -10f), new Vector2(20f, 10f));
+        goldIconImage = iconRt.gameObject.AddComponent<Image>();
+        goldIconImage.sprite = Resources.Load<Sprite>("Sprites/CoinGold");
+        goldIconImage.preserveAspect = true;
+        goldIconImage.color = Color.white;
+
+        goldValueText = CreateText("GoldValue", goldRoot, "0", 14, colorTextMain, FontStyle.Bold);
+        goldValueText.alignment = TextAnchor.MiddleLeft;
+        goldValueText.raycastTarget = false;
+        RectTransform valueRt = goldValueText.rectTransform;
+        valueRt.anchorMin = new Vector2(0f, 0f);
+        valueRt.anchorMax = new Vector2(1f, 1f);
+        valueRt.offsetMin = new Vector2(28f, 0f);
+        valueRt.offsetMax = Vector2.zero;
+    }
+
+    private void RefreshGoldUI()
+    {
+        if (goldValueText != null)
+            goldValueText.text = GoldManager.Instance != null ? $"{GoldManager.Instance.CurrentGold} G" : "0 G";
+        if (goldIconImage != null && goldIconImage.sprite == null)
+            goldIconImage.sprite = Resources.Load<Sprite>("Sprites/CoinGold");
     }
 
     private RectTransform CreateRect(string name, Transform parent, Vector2 anchorMin, Vector2 anchorMax, Vector2 offsetMin, Vector2 offsetMax)

@@ -91,10 +91,14 @@ public class ItemTooltipUI : MonoBehaviour
     /// <summary>ItemData만 있는 슬롯(RewardPopup 등)에서 툴팁 표시.</summary>
     public void ShowForItem(ItemData item, int quantity, RectTransform slotRect)
     {
+        ShowForItem(item, quantity, slotRect, 1);
+    }
+
+    public void ShowForItem(ItemData item, int quantity, RectTransform slotRect, int priceMultiplier)
+    {
         if (item == null) return;
-        // InventorySlot 임시 생성으로 기존 Populate 재사용
         var tempSlot = new InventorySlot(item, quantity);
-        PopulateInventoryItem(tempSlot);
+        PopulateInventoryItem(tempSlot, Mathf.Max(1, priceMultiplier));
         ShowImmediate();
         RefreshLayout();
     }
@@ -118,6 +122,11 @@ public class ItemTooltipUI : MonoBehaviour
     // ────────────────────────────────────────────────────────
 
     private void PopulateInventoryItem(InventorySlot slot)
+    {
+        PopulateInventoryItem(slot, 1);
+    }
+
+    private void PopulateInventoryItem(InventorySlot slot, int priceMultiplier)
     {
         ItemData item = slot.item;
         if (tooltipNameText != null)
@@ -161,7 +170,8 @@ public class ItemTooltipUI : MonoBehaviour
         if (tooltipPriceWeightText != null)
         {
             string qty = item.isStackable && slot.quantity > 1 ? $"(x{slot.quantity})" : "";
-            tooltipPriceWeightText.text = $"{item.price}G{qty}  [{item.weight:F1} Kg]";
+            int finalPrice = item.price * Mathf.Max(1, priceMultiplier);
+            tooltipPriceWeightText.text = $"{finalPrice}G{qty}  [{item.weight:F1} Kg]";
         }
     }
 
