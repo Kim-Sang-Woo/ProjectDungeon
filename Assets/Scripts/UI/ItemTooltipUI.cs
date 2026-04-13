@@ -140,7 +140,13 @@ public class ItemTooltipUI : MonoBehaviour
         if (tooltipTypeText != null)
         {
             EquipData e = item as EquipData;
-            tooltipTypeText.text = e != null ? EquipTypeLabel(e.equipType) : "소모품";
+            ConsumableItemData c = item as ConsumableItemData;
+            if (e != null)
+                tooltipTypeText.text = EquipTypeLabel(e.equipType);
+            else if (c != null)
+                tooltipTypeText.text = "소모품";
+            else
+                tooltipTypeText.text = "보물";
         }
 
         if (tooltipStatsText != null)
@@ -400,6 +406,7 @@ public class ItemTooltipUI : MonoBehaviour
             case EquipType.Boots:    return "신발";
             case EquipType.Ring:     return "반지";
             case EquipType.Necklace: return "목걸이";
+            case EquipType.Helmet:   return "투구";
             case EquipType.Amulet:   return "보조 장비";
             case EquipType.Bag:      return "가방";
             default: return t.ToString();
