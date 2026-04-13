@@ -523,12 +523,16 @@ public class RewardPopupUI : MonoBehaviour
             return;
         }
 
-        switch (Inventory.Instance.AddItem(item, qty))
+        int transferQuantity = qty;
+        if (currentMode == PanelMode.Storage)
+            transferQuantity = item.isStackable ? Mathf.Min(qty, Mathf.Max(1, item.maxStack)) : 1;
+
+        switch (Inventory.Instance.AddItem(item, transferQuantity))
         {
             case AddItemResult.Success:
                 if (currentMode == PanelMode.Storage && storageManager != null)
                 {
-                    storageManager.RemoveAt(idx);
+                    storageManager.TryTakeAt(idx, transferQuantity);
                     RefreshStorageView();
                 }
                 else
@@ -537,7 +541,7 @@ public class RewardPopupUI : MonoBehaviour
                     UpdateFooterCount();
                     if (GetFilledCount() == 0) Close();
                 }
-                FloatingTextUI.Instance?.Show($"{item.itemName} ×{qty} 획득", FloatingTextUI.ColorAcquire);
+                FloatingTextUI.Instance?.Show($"{item.itemName} ×{transferQuantity} 획득", FloatingTextUI.ColorAcquire);
                 break;
             case AddItemResult.FailSlotFull:
                 FloatingTextUI.Instance?.Show("인벤토리가 가득 찼습니다.", FloatingTextUI.ColorFail);
@@ -601,6 +605,16 @@ public class RewardPopupUI : MonoBehaviour
         bool handled = false;
         if (InventoryUI.Instance != null)
             handled = InventoryUI.Instance.TryHandleStorageDrop(dragSourceIndex, eventData);
+
+        if (!handled && currentMode == PanelMode.Storage && storageManager != null)
+        {
+            int targetIndex = GetStorageDropSlotIndex(eventData);
+            if (targetIndex >= 0 && targetIndex != dragSourceIndex)
+            {
+                storageManager.MoveSlot(dragSourceIndex, targetIndex);
+                handled = true;
+            }
+        }
 
         if (!handled)
             CancelStorageDrag();

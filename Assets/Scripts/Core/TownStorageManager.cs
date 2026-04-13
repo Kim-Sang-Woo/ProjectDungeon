@@ -53,6 +53,53 @@ public class TownStorageManager : MonoBehaviour
         return true;
     }
 
+    public bool TryTakeAt(int index, int quantity)
+    {
+        if (index < 0 || index >= Slots.Count) return false;
+        if (quantity <= 0) return false;
+
+        TownStorageSlot slot = Slots[index];
+        if (slot == null || slot.item == null || slot.quantity <= 0) return false;
+
+        if (quantity >= slot.quantity)
+        {
+            Slots.RemoveAt(index);
+        }
+        else
+        {
+            slot.quantity -= quantity;
+        }
+
+        OnStorageChanged?.Invoke();
+        return true;
+    }
+
+    public void MoveSlot(int fromIndex, int toIndex)
+    {
+        if (Slots == null || Slots.Count == 0) return;
+        if (fromIndex < 0 || fromIndex >= Slots.Count) return;
+
+        toIndex = Mathf.Clamp(toIndex, 0, Mathf.Max(0, Capacity - 1));
+        if (fromIndex == toIndex) return;
+
+        if (toIndex < Slots.Count)
+        {
+            TownStorageSlot temp = Slots[fromIndex];
+            Slots[fromIndex] = Slots[toIndex];
+            Slots[toIndex] = temp;
+            OnStorageChanged?.Invoke();
+            return;
+        }
+
+        int lastIndex = Slots.Count - 1;
+        if (fromIndex == lastIndex) return;
+
+        TownStorageSlot moving = Slots[fromIndex];
+        Slots.RemoveAt(fromIndex);
+        Slots.Add(moving);
+        OnStorageChanged?.Invoke();
+    }
+
     public void RemoveAt(int index)
     {
         if (index < 0 || index >= Slots.Count) return;

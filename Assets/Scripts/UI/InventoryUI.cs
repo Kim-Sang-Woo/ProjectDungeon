@@ -799,12 +799,16 @@ public class InventoryUI : MonoBehaviour
         TownStorageSlot storageSlot = TownStorageManager.Instance.Slots[storageIndex];
         if (storageSlot == null || storageSlot.item == null || storageSlot.quantity <= 0) return false;
 
-        switch (Inventory.Instance.AddItem(storageSlot.item, storageSlot.quantity))
+        int takeQuantity = storageSlot.item.isStackable
+            ? Mathf.Min(storageSlot.quantity, Mathf.Max(1, storageSlot.item.maxStack))
+            : 1;
+
+        switch (Inventory.Instance.AddItem(storageSlot.item, takeQuantity))
         {
             case AddItemResult.Success:
                 tooltipUI?.Hide();
-                FloatingTextUI.Instance?.Show($"{storageSlot.item.itemName} ×{storageSlot.quantity} 획득", FloatingTextUI.ColorAcquire);
-                TownStorageManager.Instance.RemoveAt(storageIndex);
+                FloatingTextUI.Instance?.Show($"{storageSlot.item.itemName} ×{takeQuantity} 획득", FloatingTextUI.ColorAcquire);
+                TownStorageManager.Instance.TryTakeAt(storageIndex, takeQuantity);
                 return true;
             case AddItemResult.FailSlotFull:
                 FloatingTextUI.Instance?.Show("인벤토리가 가득 찼습니다.", FloatingTextUI.ColorFail);
