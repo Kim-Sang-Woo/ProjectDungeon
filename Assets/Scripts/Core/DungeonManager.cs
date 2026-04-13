@@ -31,6 +31,13 @@ public class DungeonManager : MonoBehaviour
     [Tooltip("그리드 오버레이")]
     public GridOverlay gridOverlay;
 
+    [Header("시작 화면")]
+    [Tooltip("게임 시작 시 타이틀 화면을 먼저 표시한다")]
+    public bool showTitleScreenOnStart = true;
+
+    [Tooltip("타이틀 화면 UI")]
+    public TitleScreenUI titleScreenUI;
+
     // ─── 현재 층 런타임 데이터 ───
     public TileData[,] Grid { get; private set; }
     public List<RoomData> Rooms { get; private set; }
@@ -62,12 +69,30 @@ public class DungeonManager : MonoBehaviour
     {
         if (dungeonGenerator == null) dungeonGenerator = GetComponent<DungeonGenerator>();
         if (dungeonRenderer  == null) dungeonRenderer  = GetComponent<DungeonRenderer>();
+
+        if (titleScreenUI == null)
+        {
+            titleScreenUI = FindFirstObjectByType<TitleScreenUI>();
+            if (titleScreenUI == null)
+            {
+                GameObject go = new GameObject("TitleScreenUI", typeof(RectTransform), typeof(TitleScreenUI));
+                titleScreenUI = go.GetComponent<TitleScreenUI>();
+            }
+        }
     }
 
     private void Start()
     {
         CurrentFloorIndex = 0;
         GenerateAndLoadFloor(CurrentFloorIndex, true);
+
+        if (showTitleScreenOnStart && titleScreenUI != null)
+        {
+            if (movementSystem != null)
+                movementSystem.LockInput();
+
+            titleScreenUI.Show(this);
+        }
     }
 
     // ─── 층 생성 / 로드 ───
@@ -149,6 +174,17 @@ public class DungeonManager : MonoBehaviour
             movementSystem.UnlockInput();
 
         Debug.Log($"[DungeonManager] {floorIndex}층 로드 완료. 시작:{StartPosition} 출구:{ExitPosition} 배치:{spawnPos}");
+    }
+
+    public void BeginRunFromTitleScreen()
+    {
+        if (titleScreenUI != null)
+            titleScreenUI.HideImmediate();
+
+        if (movementSystem != null)
+            movementSystem.UnlockAllInputLocks();
+
+        Debug.Log("[DungeonManager] 타이틀 화면 종료, 던전 시작");
     }
 
     // ─── 층 이동 API ───
