@@ -13,6 +13,13 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum DungeonPresentationMode
+{
+    Title,
+    Town,
+    Dungeon
+}
+
 public class DungeonManager : MonoBehaviour
 {
     [Header("참조")]
@@ -38,6 +45,18 @@ public class DungeonManager : MonoBehaviour
     [Tooltip("타이틀 화면 UI")]
     public TitleScreenUI titleScreenUI;
 
+    [Tooltip("마을 화면 UI")]
+    public TownScreenUI townScreenUI;
+
+    [Tooltip("던전 오브젝트 스포너")]
+    public DungeonObjectSpawner dungeonObjectSpawner;
+
+    [Tooltip("계단 상호작용 시스템")]
+    public StairSystem stairSystem;
+
+    [Tooltip("이벤트/오브젝트 트리거")]
+    public ObjectEventTrigger objectEventTrigger;
+
     // ─── 현재 층 런타임 데이터 ───
     public TileData[,] Grid { get; private set; }
     public List<RoomData> Rooms { get; private set; }
@@ -50,6 +69,9 @@ public class DungeonManager : MonoBehaviour
 
     // ─── 층 관리 ───
     public int CurrentFloorIndex { get; private set; } = 0;
+    public DungeonPresentationMode CurrentPresentationMode { get; private set; } = DungeonPresentationMode.Title;
+    public bool IsDungeonMode => CurrentPresentationMode == DungeonPresentationMode.Dungeon;
+    public bool IsTownMode => CurrentPresentationMode == DungeonPresentationMode.Town;
 
     public event Action<int> OnFloorChanged;
 
@@ -69,6 +91,9 @@ public class DungeonManager : MonoBehaviour
     {
         if (dungeonGenerator == null) dungeonGenerator = GetComponent<DungeonGenerator>();
         if (dungeonRenderer  == null) dungeonRenderer  = GetComponent<DungeonRenderer>();
+        if (dungeonObjectSpawner == null) dungeonObjectSpawner = FindFirstObjectByType<DungeonObjectSpawner>();
+        if (stairSystem == null) stairSystem = FindFirstObjectByType<StairSystem>();
+        if (objectEventTrigger == null) objectEventTrigger = FindFirstObjectByType<ObjectEventTrigger>();
 
         if (titleScreenUI == null)
         {
@@ -79,6 +104,19 @@ public class DungeonManager : MonoBehaviour
                 titleScreenUI = go.GetComponent<TitleScreenUI>();
             }
         }
+
+        if (townScreenUI == null)
+        {
+            townScreenUI = FindFirstObjectByType<TownScreenUI>();
+            if (townScreenUI == null)
+            {
+                GameObject go = new GameObject("TownScreenUI", typeof(RectTransform), typeof(TownScreenUI));
+                townScreenUI = go.GetComponent<TownScreenUI>();
+            }
+        }
+
+        if (TownStorageManager.Instance == null)
+            new GameObject("TownStorageManager", typeof(TownStorageManager));
     }
 
     private void Start()
@@ -87,12 +125,9 @@ public class DungeonManager : MonoBehaviour
         GenerateAndLoadFloor(CurrentFloorIndex, true);
 
         if (showTitleScreenOnStart && titleScreenUI != null)
-        {
-            if (movementSystem != null)
-                movementSystem.LockInput();
-
-            titleScreenUI.Show(this);
-        }
+            EnterTitleMode();
+        else
+            EnterTownMode();
     }
 
     // ─── 층 생성 / 로드 ───
@@ -181,10 +216,100 @@ public class DungeonManager : MonoBehaviour
         if (titleScreenUI != null)
             titleScreenUI.HideImmediate();
 
+        EnterTownMode();
+        Debug.Log("[DungeonManager] 타이틀 화면 종료, 마을 진입");
+    }
+
+    public void BeginFreshDungeonRunFromTown()
+    {
+        if (townScreenUI != null)
+            townScreenUI.HideImmediate();
+
+        InventoryUI.Instance?.SetTownStorageForcedOpen(false);
+        InventoryUI.Instance?.Hide();
+
+        ClearDungeonCache();
+        GenerateAndLoadFloor(0, true);
+        fogOfWar?.ResetAllFogState();
+        SetDungeonVisualsActive(true);
+        CurrentPresentationMode = DungeonPresentationMode.Dungeon;
+
         if (movementSystem != null)
             movementSystem.UnlockAllInputLocks();
 
-        Debug.Log("[DungeonManager] 타이틀 화면 종료, 던전 시작");
+        Debug.Log("[DungeonManager] 마을에서 새 던전 런 시작");
+    }
+
+    public void EnterTownMode()
+    {
+        CurrentPresentationMode = DungeonPresentationMode.Town;
+
+        if (titleScreenUI != null)
+            titleScreenUI.HideImmediate();
+        if (townScreenUI != null)
+            townScreenUI.Show(this);
+
+        if (movementSystem != null)
+            movementSystem.LockInput();
+
+        InventoryUI.Instance?.Hide();
+        StatPanelUI.Instance?.Hide();
+        SetDungeonVisualsActive(false);
+
+        Debug.Log("[DungeonManager] 마을 화면 진입");
+    }
+
+    public void EnterTitleMode()
+    {
+        CurrentPresentationMode = DungeonPresentationMode.Title;
+
+        if (townScreenUI != null)
+            townScreenUI.HideImmediate();
+        if (titleScreenUI != null)
+            titleScreenUI.Show(this);
+
+        if (movementSystem != null)
+            movementSystem.LockInput();
+
+        InventoryUI.Instance?.Hide();
+        StatPanelUI.Instance?.Hide();
+        SetDungeonVisualsActive(false);
+
+        Debug.Log("[DungeonManager] 타이틀 화면 진입");
+    }
+
+    private void ClearDungeonCache()
+    {
+        floorCacheMap.Clear();
+        Grid = null;
+        Rooms = null;
+        StartPosition = Vector2Int.zero;
+        ExitPosition = Vector2Int.zero;
+        CurrentFloorIndex = 0;
+    }
+
+    private void SetDungeonVisualsActive(bool active)
+    {
+        if (dungeonRenderer != null && dungeonRenderer.tilemap != null)
+            dungeonRenderer.tilemap.gameObject.SetActive(active);
+
+        if (movementSystem != null)
+            movementSystem.gameObject.SetActive(active);
+
+        if (fogOfWar != null)
+            fogOfWar.gameObject.SetActive(active);
+
+        if (gridOverlay != null)
+            gridOverlay.gameObject.SetActive(active);
+
+        if (dungeonObjectSpawner != null)
+            dungeonObjectSpawner.gameObject.SetActive(active);
+
+        if (stairSystem != null)
+            stairSystem.enabled = active;
+
+        if (objectEventTrigger != null)
+            objectEventTrigger.enabled = active;
     }
 
     // ─── 층 이동 API ───
@@ -209,11 +334,11 @@ public class DungeonManager : MonoBehaviour
         GenerateAndLoadFloor(CurrentFloorIndex - 1, false);
     }
 
-    /// <summary>임시 마을 복귀: 1층 START(계단 UP) 위치로 복귀</summary>
+    /// <summary>던전에서 마을 화면으로 복귀</summary>
     public void ReturnToTownSpawn()
     {
-        Debug.Log($"[DungeonManager] 마을 복귀(임시): {CurrentFloorIndex}층 -> 0층 START");
-        GenerateAndLoadFloor(0, true);
+        Debug.Log($"[DungeonManager] 마을 복귀: {CurrentFloorIndex}층 -> Town");
+        EnterTownMode();
     }
 
     // ─── 공용 API ───

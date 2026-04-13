@@ -181,6 +181,21 @@ public class FogOfWar : MonoBehaviour
         currentEdge.Clear();
     }
 
+    public void ResetAllFogState()
+    {
+        fogCacheMap.Clear();
+        currentCachedFloor = dungeonManager != null ? dungeonManager.CurrentFloorIndex : -1;
+        lastPlayerTile = new Vector2Int(-999, -999);
+
+        if (fogMap != null)
+            ResetFogMap();
+
+        if (movementSystem != null && dungeonManager != null && dungeonManager.Grid != null && fogMap != null)
+            UpdateFog(movementSystem.CurrentTilePosition);
+
+        Debug.Log("[FogOfWar] 모든 안개 캐시 초기화 완료");
+    }
+
     // ─── FOV 갱신 ───
 
     private void UpdateFog(Vector2Int origin)

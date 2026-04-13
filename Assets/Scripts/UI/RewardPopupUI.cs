@@ -1,21 +1,3 @@
-// ============================================================
-// RewardPopupUI.cs — 보상 획득 UI (4×4 그리드)
-// 위치: Assets/Scripts/UI/RewardPopupUI.cs
-// ============================================================
-// [씬 배치]
-//   RewardPopupPanel (GameObject)
-//     컴포넌트: RewardPopupUI + CanvasGroup
-//     자식 오브젝트 불필요 — 모두 코드로 생성
-//
-// [Inspector 설정]
-//   없음 — 모든 UI/레이아웃/색상을 코드로 제어
-//   수치 조정이 필요한 경우 하단 [Header("레이아웃")] 섹션 참조
-//
-// [동작]
-//   Show()  : 아이템 목록을 받아 슬롯에 배치 후 패널 표시
-//   우클릭  : 해당 슬롯 아이템 → Inventory.AddItem() → 슬롯 비우기
-//   Close() : 남은 슬롯 아이템 조용히 버림 → 패널 닫기
-// ============================================================
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -23,7 +5,12 @@ using UnityEngine.EventSystems;
 
 public class RewardPopupUI : MonoBehaviour
 {
-    // ── 레이아웃 수치 (Inspector에서 조정 가능) ──────────
+    public enum PanelMode
+    {
+        Reward,
+        Storage
+    }
+
     [Header("레이아웃")]
     public float panelWidth   = 280f;
     public float headerHeight = 44f;
@@ -33,7 +20,6 @@ public class RewardPopupUI : MonoBehaviour
     public float paddingH     = 14f;
     public float paddingV     = 14f;
 
-    // ── 색상 ──────────────────────────────────────────────
     [Header("색상")]
     public Color colorPanelBg   = new Color(0.071f, 0.063f, 0.051f, 1f);
     public Color colorHeaderBg  = new Color(0.125f, 0.110f, 0.075f, 1f);
@@ -44,26 +30,33 @@ public class RewardPopupUI : MonoBehaviour
     public Color colorGold      = new Color(0.784f, 0.659f, 0.294f, 1f);
     public Color colorDim       = new Color(0.478f, 0.416f, 0.294f, 1f);
 
-    // ── 내부 상태 ─────────────────────────────────────────
-    private const int COLS       = 4;
-    private const int ROWS       = 4;
-    private const int SLOT_COUNT = COLS * ROWS;
-
     private struct SlotState
     {
         public GameObject root;
-        public Image      icon;
-        public Text       count;
-        public ItemData   item;
-        public int        quantity;
+        public Image icon;
+        public Text count;
+        public ItemData item;
+        public int quantity;
     }
 
-    private SlotState[] slots        = new SlotState[SLOT_COUNT];
-    private Text        titleText;
-    private Text        itemCountText;
-    private bool        initialized  = false;
+    private readonly List<SlotState> slots = new List<SlotState>();
+    private RectTransform panelRT;
+    private RectTransform gridRT;
+    private Canvas popupCanvas;
+    private GraphicRaycaster popupRaycaster;
+    private Text titleText;
+    private Text itemCountText;
+    private Text hintText;
+    private Button closeButton;
+    private bool initialized;
+    private int currentCols = 4;
+    private int currentRows = 4;
+    private PanelMode currentMode = PanelMode.Reward;
+    private TownStorageManager storageManager;
+    private TownStorageManager subscribedStorageManager;
 
-    // ─────────────────────────────────────────────────────
+    private int SlotCount => Mathf.Max(1, currentCols * currentRows);
+
     private void Awake()
     {
         gameObject.SetActive(false);
@@ -71,125 +64,132 @@ public class RewardPopupUI : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Escape))
-            Close();
+        if (currentMode == PanelMode.Storage) return;
+        if (Input.GetKeyDown(KeyCode.Escape)) Close();
     }
 
     private void EnsureInitialized()
     {
         if (initialized) return;
         initialized = true;
-        BuildPanel();
+
+        panelRT = GetComponent<RectTransform>() ?? gameObject.AddComponent<RectTransform>();
+        panelRT.anchorMin = new Vector2(0.5f, 0.5f);
+        panelRT.anchorMax = new Vector2(0.5f, 0.5f);
+        panelRT.pivot = new Vector2(0.5f, 0.5f);
+
+        if (!TryGetComponent(out popupCanvas))
+            popupCanvas = gameObject.AddComponent<Canvas>();
+        popupCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        popupCanvas.overrideSorting = true;
+        popupCanvas.sortingOrder = 4700;
+
+        if (!TryGetComponent(out popupRaycaster))
+            popupRaycaster = gameObject.AddComponent<GraphicRaycaster>();
+
+        SetBg(gameObject, colorPanelBg);
+        RebuildPanel();
     }
 
-    // ── 패널 전체 빌드 ────────────────────────────────────
-    private void BuildPanel()
+    private void RebuildPanel()
     {
-        float gridH  = paddingV + ROWS * slotSize + (ROWS - 1) * slotSpacing + paddingV;
+        for (int i = transform.childCount - 1; i >= 0; i--)
+            DestroyImmediate(transform.GetChild(i).gameObject);
+        slots.Clear();
+
+        float gridH = paddingV + currentRows * slotSize + (currentRows - 1) * slotSpacing + paddingV;
         float totalH = headerHeight + gridH + footerHeight;
+        float gridW = paddingH + currentCols * slotSize + (currentCols - 1) * slotSpacing + paddingH;
+        float finalWidth = Mathf.Max(panelWidth, gridW);
 
-        // 패널 RectTransform — 화면 중앙 고정
-        RectTransform panelRT = GetComponent<RectTransform>()
-                                ?? gameObject.AddComponent<RectTransform>();
-        panelRT.anchorMin        = new Vector2(0.5f, 0.5f);
-        panelRT.anchorMax        = new Vector2(0.5f, 0.5f);
-        panelRT.pivot            = new Vector2(0.5f, 0.5f);
-        panelRT.sizeDelta        = new Vector2(panelWidth, totalH);
-        panelRT.anchoredPosition = new Vector2(410f, 0f);
-        SetBg(gameObject, colorPanelBg);
+        panelRT.sizeDelta = new Vector2(finalWidth, totalH);
+        panelRT.anchoredPosition = Vector2.zero;
 
-        // ── Header ────────────────────────────────────
         GameObject header = MakeBlock("Header", panelRT, 0f, headerHeight, colorHeaderBg);
-
         titleText = MakeText(header, "TitleText",
             new Vector2(0f, 0f), new Vector2(0.75f, 1f),
-            new Vector4(paddingH, 0, 0, 0),
+            new Vector4(paddingH, 0f, 0f, 0f),
             "REWARD", 12, FontStyle.Bold, colorGold, TextAnchor.MiddleLeft);
 
-        Button closeBtn = MakeButton(header, "CloseButton",
+        closeButton = MakeButton(header, "CloseButton",
             new Vector2(0.78f, 0.15f), new Vector2(1f, 0.85f),
-            new Vector4(0, 0, paddingH, 0),
+            new Vector4(0f, 0f, paddingH, 0f),
             "CLOSE", 9, colorDim);
-        closeBtn.onClick.AddListener(Close);
+        closeButton.onClick.RemoveAllListeners();
+        closeButton.onClick.AddListener(Close);
 
-        // ── Grid Section ──────────────────────────────
         GameObject gridSection = MakeBlock("GridSection", panelRT, headerHeight, gridH, colorGridBg);
-
-        GameObject gridGo = new GameObject("RewardGrid");
+        GameObject gridGo = new GameObject("RewardGrid", typeof(RectTransform), typeof(GridLayoutGroup));
         gridGo.transform.SetParent(gridSection.transform, false);
-        RectTransform gridRT = gridGo.AddComponent<RectTransform>();
+        gridRT = gridGo.GetComponent<RectTransform>();
         gridRT.anchorMin = Vector2.zero;
         gridRT.anchorMax = Vector2.one;
         gridRT.offsetMin = Vector2.zero;
         gridRT.offsetMax = Vector2.zero;
 
-        GridLayoutGroup g = gridGo.AddComponent<GridLayoutGroup>();
-        g.cellSize        = new Vector2(slotSize, slotSize);
-        g.spacing         = new Vector2(slotSpacing, slotSpacing);
-        g.constraint      = GridLayoutGroup.Constraint.FixedColumnCount;
-        g.constraintCount = COLS;
-        g.padding         = new RectOffset((int)paddingH, (int)paddingH, (int)paddingV, (int)paddingV);
-        g.childAlignment  = TextAnchor.UpperLeft;
+        GridLayoutGroup g = gridGo.GetComponent<GridLayoutGroup>();
+        g.cellSize = new Vector2(slotSize, slotSize);
+        g.spacing = new Vector2(slotSpacing, slotSpacing);
+        g.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+        g.constraintCount = currentCols;
+        g.padding = new RectOffset((int)paddingH, (int)paddingH, (int)paddingV, (int)paddingV);
+        g.childAlignment = TextAnchor.UpperLeft;
 
-        BuildSlots(gridRT);
+        BuildSlots(gridRT, SlotCount);
 
-        // ── Footer ────────────────────────────────────
         GameObject footer = MakeBlock("Footer", panelRT, headerHeight + gridH, footerHeight, colorFooterBg);
-
-        MakeText(footer, "HintText",
-            new Vector2(0f, 0f), new Vector2(0.6f, 1f),
-            new Vector4(paddingH, 0, 0, 0),
+        hintText = MakeText(footer, "HintText",
+            new Vector2(0f, 0f), new Vector2(0.7f, 1f),
+            new Vector4(paddingH, 0f, 0f, 0f),
             "우클릭 — 가방으로 이동", 10, FontStyle.Italic, colorDim, TextAnchor.MiddleLeft);
 
         itemCountText = MakeText(footer, "ItemCountText",
-            new Vector2(0.6f, 0f), new Vector2(1f, 1f),
-            new Vector4(0, 0, paddingH, 0),
-            $"0 / {SLOT_COUNT}", 10, FontStyle.Normal, colorDim, TextAnchor.MiddleRight);
+            new Vector2(0.7f, 0f), new Vector2(1f, 1f),
+            new Vector4(0f, 0f, paddingH, 0f),
+            $"0 / {SlotCount}", 10, FontStyle.Normal, colorDim, TextAnchor.MiddleRight);
     }
 
-    // ── 슬롯 생성 ─────────────────────────────────────────
-    private void BuildSlots(RectTransform parent)
+    private void BuildSlots(RectTransform parent, int count)
     {
-        for (int i = 0; i < SLOT_COUNT; i++)
+        for (int i = 0; i < count; i++)
         {
-            GameObject go = new GameObject($"RewardSlot_{i}");
+            GameObject go = new GameObject($"RewardSlot_{i}", typeof(RectTransform), typeof(Image), typeof(Button));
             go.transform.SetParent(parent, false);
-            go.AddComponent<RectTransform>().sizeDelta = new Vector2(slotSize, slotSize);
+            go.GetComponent<RectTransform>().sizeDelta = new Vector2(slotSize, slotSize);
 
-            Image bg  = go.AddComponent<Image>();
-            bg.type   = Image.Type.Simple;
-            bg.sprite = null;
-            bg.color  = colorSlotEmpty;
-            go.AddComponent<Button>().transition = Selectable.Transition.None;
+            Image bg = go.GetComponent<Image>();
+            bg.color = colorSlotEmpty;
 
-            // 아이콘
-            GameObject iconGo = new GameObject("IconImage");
+            Button btn = go.GetComponent<Button>();
+            btn.transition = Selectable.Transition.None;
+
+            GameObject iconGo = new GameObject("IconImage", typeof(RectTransform), typeof(Image));
             iconGo.transform.SetParent(go.transform, false);
-            RectTransform iconRT = iconGo.AddComponent<RectTransform>();
+            RectTransform iconRT = iconGo.GetComponent<RectTransform>();
             iconRT.anchorMin = new Vector2(0.08f, 0.08f);
             iconRT.anchorMax = new Vector2(0.92f, 0.92f);
             iconRT.offsetMin = Vector2.zero;
             iconRT.offsetMax = Vector2.zero;
-            Image iconImg = iconGo.AddComponent<Image>();
+            Image iconImg = iconGo.GetComponent<Image>();
             iconImg.preserveAspect = true;
-            iconImg.enabled        = false;
+            iconImg.enabled = false;
 
-            // 수량
-            GameObject countGo = new GameObject("CountText");
+            GameObject countGo = new GameObject("CountText", typeof(RectTransform), typeof(Text));
             countGo.transform.SetParent(go.transform, false);
-            RectTransform countRT = countGo.AddComponent<RectTransform>();
+            RectTransform countRT = countGo.GetComponent<RectTransform>();
             countRT.anchorMin = new Vector2(0f, 0f);
             countRT.anchorMax = new Vector2(1f, 0.38f);
             countRT.offsetMin = new Vector2(2f, 2f);
             countRT.offsetMax = new Vector2(-2f, 0f);
-            Text countTxt    = countGo.AddComponent<Text>();
-            countTxt.font    = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            countTxt.fontSize  = 10;
-            countTxt.color     = colorGold;
+            Text countTxt = countGo.GetComponent<Text>();
+            countTxt.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            countTxt.fontSize = 10;
+            countTxt.color = colorGold;
             countTxt.alignment = TextAnchor.LowerRight;
-            countTxt.enabled   = false;
+            countTxt.enabled = false;
 
-            slots[i] = new SlotState { root = go, icon = iconImg, count = countTxt };
+            SlotState state = new SlotState { root = go, icon = iconImg, count = countTxt };
+            slots.Add(state);
 
             int idx = i;
             AddRightClickHandler(go, () => OnSlotRightClick(idx));
@@ -197,46 +197,117 @@ public class RewardPopupUI : MonoBehaviour
         }
     }
 
-    // ── 공개 API ──────────────────────────────────────────
-
     public void Show(string displayName, List<RewardItemEntry> items)
     {
-        gameObject.SetActive(true);
+        UnsubscribeStorageEvents();
+        currentMode = PanelMode.Reward;
+        currentCols = 4;
+        currentRows = 4;
+        storageManager = null;
+
         EnsureInitialized();
+        RebuildPanel();
+        gameObject.SetActive(true);
+        transform.SetAsLastSibling();
 
         if (titleText != null)
             titleText.text = string.IsNullOrEmpty(displayName) ? "REWARD" : displayName.ToUpper();
+        if (hintText != null)
+            hintText.text = "우클릭 — 가방으로 이동";
+        if (closeButton != null)
+            closeButton.gameObject.SetActive(true);
 
-        for (int i = 0; i < SLOT_COUNT; i++) SetEmpty(ref slots[i]);
-        for (int i = 0; i < items.Count && i < SLOT_COUNT; i++)
-            SetItem(ref slots[i], items[i].item, items[i].value);
+        ClearSlots();
+        for (int i = 0; i < items.Count && i < slots.Count; i++)
+            SetItem(i, items[i].item, items[i].value);
 
+        UpdateFooterCount();
+    }
+
+    public void ShowStorage(string header, TownStorageManager manager, int columns, int rows, bool hideCloseButton)
+    {
+        UnsubscribeStorageEvents();
+        currentMode = PanelMode.Storage;
+        currentCols = Mathf.Max(1, columns);
+        currentRows = Mathf.Max(1, rows);
+        storageManager = manager;
+        subscribedStorageManager = manager;
+        if (subscribedStorageManager != null)
+            subscribedStorageManager.OnStorageChanged += RefreshStorageView;
+
+        EnsureInitialized();
+        RebuildPanel();
+        gameObject.SetActive(true);
+        transform.SetAsLastSibling();
+
+        if (titleText != null)
+            titleText.text = string.IsNullOrEmpty(header) ? "보관함" : header;
+        if (hintText != null)
+            hintText.text = "우클릭 — 가방으로 이동";
+        if (closeButton != null)
+            closeButton.gameObject.SetActive(!hideCloseButton);
+
+        RefreshStorageView();
+    }
+
+    public void RefreshStorageView()
+    {
+        if (currentMode != PanelMode.Storage) return;
+
+        ClearSlots();
+        if (storageManager != null)
+        {
+            var entries = storageManager.Slots;
+            for (int i = 0; i < entries.Count && i < slots.Count; i++)
+                SetItem(i, entries[i].item, entries[i].quantity);
+        }
         UpdateFooterCount();
     }
 
     public void Close()
     {
+        UnsubscribeStorageEvents();
         ItemTooltipUI.Instance?.Hide();
-        for (int i = 0; i < SLOT_COUNT; i++) slots[i].item = null;
+        ClearSlots();
         gameObject.SetActive(false);
     }
 
-    // ── 슬롯 상태 ─────────────────────────────────────────
-
-    private void SetItem(ref SlotState s, ItemData item, int qty)
+    private void SetItem(int index, ItemData item, int qty)
     {
-        s.item = item; s.quantity = qty;
+        if (index < 0 || index >= slots.Count) return;
+        SlotState s = slots[index];
+        s.item = item;
+        s.quantity = qty;
         SetSlotBg(s.root, colorSlotBg);
-        if (s.icon  != null) { s.icon.sprite = item?.icon; s.icon.color = Color.white; s.icon.enabled = item != null; }
-        if (s.count != null) { s.count.text = qty > 1 ? qty.ToString() : ""; s.count.enabled = qty > 1; }
+        if (s.icon != null)
+        {
+            s.icon.sprite = item != null ? item.icon : null;
+            s.icon.color = Color.white;
+            s.icon.enabled = item != null;
+        }
+        if (s.count != null)
+        {
+            s.count.text = qty > 1 ? qty.ToString() : "";
+            s.count.enabled = qty > 1;
+        }
+        slots[index] = s;
     }
 
-    private void SetEmpty(ref SlotState s)
+    private void SetEmpty(int index)
     {
-        s.item = null; s.quantity = 0;
+        if (index < 0 || index >= slots.Count) return;
+        SlotState s = slots[index];
+        s.item = null;
+        s.quantity = 0;
         SetSlotBg(s.root, colorSlotEmpty);
-        if (s.icon  != null) s.icon.enabled  = false;
+        if (s.icon != null) s.icon.enabled = false;
         if (s.count != null) s.count.enabled = false;
+        slots[index] = s;
+    }
+
+    private void ClearSlots()
+    {
+        for (int i = 0; i < slots.Count; i++) SetEmpty(i);
     }
 
     private void SetSlotBg(GameObject go, Color color)
@@ -246,8 +317,6 @@ public class RewardPopupUI : MonoBehaviour
         if (img != null) img.color = color;
     }
 
-    // ── 툴팁 ──────────────────────────────────────────────
-
     private void AddHoverHandler(GameObject go, int idx)
     {
         EventTrigger trigger = go.GetComponent<EventTrigger>() ?? go.AddComponent<EventTrigger>();
@@ -255,9 +324,7 @@ public class RewardPopupUI : MonoBehaviour
         var enter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
         enter.callback.AddListener(_ =>
         {
-            if (slots[idx].item == null) return;
-            // slots[idx].root는 슬롯 루트 GameObject — 호버 시점에 참조해도 안전
-            // (GridLayoutGroup 레이아웃은 Show() → EnsureInitialized() 완료 후 확정됨)
+            if (idx < 0 || idx >= slots.Count || slots[idx].item == null) return;
             RectTransform rt = slots[idx].root.GetComponent<RectTransform>();
             ItemTooltipUI.Instance?.ShowForItem(slots[idx].item, slots[idx].quantity, rt);
         });
@@ -268,22 +335,33 @@ public class RewardPopupUI : MonoBehaviour
         trigger.triggers.Add(exit);
     }
 
-    // ── 우클릭 ────────────────────────────────────────────
-
     private void OnSlotRightClick(int idx)
     {
-        if (slots[idx].item == null) return;
+        if (idx < 0 || idx >= slots.Count || slots[idx].item == null) return;
         ItemData item = slots[idx].item;
-        int      qty  = slots[idx].quantity;
+        int qty = slots[idx].quantity;
 
-        if (Inventory.Instance == null) { Debug.LogWarning("[RewardPopupUI] Inventory null"); return; }
+        if (Inventory.Instance == null)
+        {
+            Debug.LogWarning("[RewardPopupUI] Inventory null");
+            return;
+        }
 
         switch (Inventory.Instance.AddItem(item, qty))
         {
             case AddItemResult.Success:
-                SetEmpty(ref slots[idx]);
+                if (currentMode == PanelMode.Storage && storageManager != null)
+                {
+                    storageManager.RemoveAt(idx);
+                    RefreshStorageView();
+                }
+                else
+                {
+                    SetEmpty(idx);
+                    UpdateFooterCount();
+                    if (GetFilledCount() == 0) Close();
+                }
                 FloatingTextUI.Instance?.Show($"{item.itemName} ×{qty} 획득", FloatingTextUI.ColorAcquire);
-                UpdateFooterCount();
                 break;
             case AddItemResult.FailSlotFull:
                 FloatingTextUI.Instance?.Show("인벤토리가 가득 찼습니다.", FloatingTextUI.ColorFail);
@@ -294,88 +372,97 @@ public class RewardPopupUI : MonoBehaviour
         }
     }
 
-    // ── 푸터 카운트 ───────────────────────────────────────
+    private int GetFilledCount()
+    {
+        int filled = 0;
+        for (int i = 0; i < slots.Count; i++)
+            if (slots[i].item != null) filled++;
+        return filled;
+    }
 
     private void UpdateFooterCount()
     {
         if (itemCountText == null) return;
-        int filled = 0;
-        foreach (var s in slots) if (s.item != null) filled++;
-        itemCountText.text = $"{filled} / {SLOT_COUNT}";
-
-        // 남은 아이템이 0개면 자동 닫기
-        if (filled == 0) Close();
+        itemCountText.text = $"{GetFilledCount()} / {slots.Count}";
     }
 
-    // ── UI 생성 헬퍼 ──────────────────────────────────────
-
-    private GameObject MakeBlock(string name, RectTransform parent,
-        float offsetFromTop, float height, Color bgColor)
+    private GameObject MakeBlock(string name, RectTransform parent, float offsetFromTop, float height, Color bgColor)
     {
-        GameObject go = new GameObject(name);
+        GameObject go = new GameObject(name, typeof(RectTransform), typeof(Image));
         go.transform.SetParent(parent, false);
-        RectTransform rt = go.AddComponent<RectTransform>();
-        rt.anchorMin        = new Vector2(0f, 1f);
-        rt.anchorMax        = new Vector2(1f, 1f);
-        rt.pivot            = new Vector2(0.5f, 1f);
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0f, 1f);
+        rt.anchorMax = new Vector2(1f, 1f);
+        rt.pivot = new Vector2(0.5f, 1f);
         rt.anchoredPosition = new Vector2(0f, -offsetFromTop);
-        rt.sizeDelta        = new Vector2(0f, height);
+        rt.sizeDelta = new Vector2(0f, height);
         SetBg(go, bgColor);
         return go;
     }
 
-    private Text MakeText(GameObject parent, string name,
-        Vector2 anchorMin, Vector2 anchorMax, Vector4 offset,
-        string text, int size, FontStyle style, Color color, TextAnchor alignment)
+    private Text MakeText(GameObject parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector4 offset, string text, int size, FontStyle style, Color color, TextAnchor alignment)
     {
-        GameObject go = new GameObject(name);
+        GameObject go = new GameObject(name, typeof(RectTransform), typeof(Text));
         go.transform.SetParent(parent.transform, false);
-        RectTransform rt = go.AddComponent<RectTransform>();
-        rt.anchorMin = anchorMin; rt.anchorMax = anchorMax;
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = anchorMin;
+        rt.anchorMax = anchorMax;
         rt.offsetMin = new Vector2(offset.x, offset.y);
         rt.offsetMax = new Vector2(-offset.z, -offset.w);
-        Text t = go.AddComponent<Text>();
-        t.font      = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        t.text      = text; t.fontSize = size; t.fontStyle = style;
-        t.color     = color; t.alignment = alignment;
+        Text t = go.GetComponent<Text>();
+        t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        t.text = text;
+        t.fontSize = size;
+        t.fontStyle = style;
+        t.color = color;
+        t.alignment = alignment;
         t.horizontalOverflow = HorizontalWrapMode.Overflow;
-        t.verticalOverflow   = VerticalWrapMode.Overflow;
+        t.verticalOverflow = VerticalWrapMode.Overflow;
         return t;
     }
 
-    private Button MakeButton(GameObject parent, string name,
-        Vector2 anchorMin, Vector2 anchorMax, Vector4 offset,
-        string label, int fontSize, Color labelColor)
+    private Button MakeButton(GameObject parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector4 offset, string label, int fontSize, Color labelColor)
     {
-        GameObject go = new GameObject(name);
+        GameObject go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
         go.transform.SetParent(parent.transform, false);
-        RectTransform rt = go.AddComponent<RectTransform>();
-        rt.anchorMin = anchorMin; rt.anchorMax = anchorMax;
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = anchorMin;
+        rt.anchorMax = anchorMax;
         rt.offsetMin = new Vector2(offset.x, offset.y);
         rt.offsetMax = new Vector2(-offset.z, -offset.w);
         SetBg(go, new Color(0.1f, 0.09f, 0.06f, 1f));
-        Button btn = go.AddComponent<Button>();
+        Button btn = go.GetComponent<Button>();
         btn.transition = Selectable.Transition.ColorTint;
-        MakeText(go, "Text", Vector2.zero, Vector2.one, Vector4.zero,
-            label, fontSize, FontStyle.Normal, labelColor, TextAnchor.MiddleCenter);
+        MakeText(go, "Text", Vector2.zero, Vector2.one, Vector4.zero, label, fontSize, FontStyle.Normal, labelColor, TextAnchor.MiddleCenter);
         return btn;
     }
 
     private void SetBg(GameObject go, Color color)
     {
         Image img = go.GetComponent<Image>() ?? go.AddComponent<Image>();
-        img.type = Image.Type.Simple; img.sprite = null; img.color = color;
+        img.type = Image.Type.Simple;
+        img.sprite = null;
+        img.color = color;
     }
 
     private void AddRightClickHandler(GameObject go, System.Action onRightClick)
     {
         EventTrigger trigger = go.GetComponent<EventTrigger>() ?? go.AddComponent<EventTrigger>();
         var entry = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
-        entry.callback.AddListener((data) =>
+        entry.callback.AddListener(data =>
         {
             if (((PointerEventData)data).button == PointerEventData.InputButton.Right)
                 onRightClick?.Invoke();
         });
         trigger.triggers.Add(entry);
+    }
+
+    private void UnsubscribeStorageEvents()
+    {
+        if (subscribedStorageManager != null)
+        {
+            subscribedStorageManager.OnStorageChanged -= RefreshStorageView;
+            subscribedStorageManager = null;
+        }
     }
 }

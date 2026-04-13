@@ -89,4 +89,37 @@ public class EventData : ScriptableObject
         data.choices = new EventChoice[] { goChoice, stayChoice };
         return data;
     }
+
+    public static EventData FromTownReturnStairs(
+        DungeonManager dungeonManager)
+    {
+        var data = CreateInstance<EventData>();
+        data.eventId = "stairs_town_return";
+        data.eventName = "돌 계단";
+        data.desc = "마을로 돌아갈 수 있다.";
+        data.image = Resources.Load<Sprite>("Sprites/Object_StairsTown");
+        data.isRepeatable = true;
+
+        var returnChoice = CreateInstance<EventChoice>();
+        returnChoice.choiceId = "return_town";
+        returnChoice.choiceType = ChoiceType.Default;
+        returnChoice.label = "마을로 돌아간다.";
+        returnChoice.successRate = 100;
+        returnChoice.onSuccess = null;
+        returnChoice.directEffects = new EventEffect[]
+        {
+            new ReturnToTownEffect
+            {
+                dungeonManager = dungeonManager,
+            }
+        };
+
+        var stayChoice = CreateInstance<EventChoice>();
+        stayChoice.choiceId = "stay";
+        stayChoice.choiceType = ChoiceType.Close;
+        stayChoice.label = "머무른다.";
+
+        data.choices = new EventChoice[] { returnChoice, stayChoice };
+        return data;
+    }
 }

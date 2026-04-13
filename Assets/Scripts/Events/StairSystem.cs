@@ -52,7 +52,7 @@ public class StairSystem : MonoBehaviour
         {
             if (dungeonManager.CurrentFloorIndex <= 0)
             {
-                Debug.Log("[StairSystem] 최상위 층 — 더 올라갈 수 없습니다.");
+                Debug.Log("[StairSystem] 1층 올라가는 계단 — 직접 이동 대신 이벤트 팝업 사용");
                 return;
             }
 

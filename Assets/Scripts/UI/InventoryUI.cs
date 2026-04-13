@@ -75,6 +75,7 @@ public class InventoryUI : MonoBehaviour
     private Image          dragIconImage;
     private RectTransform  dragIconRect;
     private Canvas         rootCanvas;
+    private bool           forceOpenForTownStorage;
 
     /// <summary>가방 열림/닫힘 시 발신 — true=열림, false=닫힘</summary>
     public event System.Action<bool> OnInventoryToggled;
@@ -115,6 +116,7 @@ public class InventoryUI : MonoBehaviour
 
         if (!Input.GetKeyDown(KeyCode.Tab)) return;
         if (IsBattleBlockingInventory()) return;
+        if (IsTownBlockingInventory()) return;
         Toggle();
     }
 
@@ -135,8 +137,30 @@ public class InventoryUI : MonoBehaviour
         OnInventoryToggled?.Invoke(true);
     }
 
+    public void SetTownStorageForcedOpen(bool forced)
+    {
+        forceOpenForTownStorage = forced;
+
+        if (forced)
+        {
+            isVisible = true;
+            Refresh();
+            ShowImmediate();
+            UpdateHintText();
+            OnInventoryToggled?.Invoke(true);
+        }
+        else
+        {
+            forceOpenForTownStorage = false;
+            if (isVisible)
+                Hide();
+        }
+    }
+
     public void Hide()
     {
+        if (forceOpenForTownStorage) return;
+
         isVisible = false;
         isDragging = false;
         dragSourceIndex = -1;
@@ -288,6 +312,12 @@ public class InventoryUI : MonoBehaviour
 
     // ────────────────────────────────────────────────────────
     private void RefreshIfVisible() { if (isVisible) Refresh(); }
+
+    private bool IsTownBlockingInventory()
+    {
+        DungeonManager dm = FindFirstObjectByType<DungeonManager>();
+        return dm != null && !dm.IsDungeonMode;
+    }
 
     private void Refresh()
     {
@@ -452,8 +482,23 @@ public class InventoryUI : MonoBehaviour
     private void OnRightClick(InventorySlot slot, int index)
     {
         if (slot == null) return;
+
+        if (forceOpenForTownStorage && TownStorageManager.Instance != null)
+        {
+            if (TownStorageManager.Instance.TryStore(slot.item, slot.quantity))
+            {
+                tooltipUI?.Hide();
+                FloatingTextUI.Instance?.Show($"{slot.item.itemName} ×{slot.quantity} 보관", FloatingTextUI.ColorAcquire);
+                Inventory.Instance?.RemoveAt(index);
+            }
+            else
+            {
+                FloatingTextUI.Instance?.Show("보관함이 가득 찼습니다.", FloatingTextUI.ColorFail);
+            }
+            return;
+        }
+
         EquipData equip = slot.item as EquipData;
-        // 장착 가능한 아이템만 처리, 그 외는 무응답
         if (equip == null) return;
         tooltipUI?.Hide();
         Inventory.Instance?.RemoveAt(index);
@@ -463,6 +508,7 @@ public class InventoryUI : MonoBehaviour
     private void OnCtrlRightClick(InventorySlot slot, int index)
     {
         if (slot == null) return;
+        if (forceOpenForTownStorage) return;
         tooltipUI?.Hide();
         Inventory.Instance?.RemoveAt(index);
         if (debugLogs) Debug.Log($"[InventoryUI] 아이템 버리기: {slot.item.itemName}");

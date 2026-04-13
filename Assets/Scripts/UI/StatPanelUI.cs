@@ -78,10 +78,17 @@ public class StatPanelUI : MonoBehaviour
     {
         if (!Input.GetKeyDown(KeyCode.C)) return;
         if (IsBattleBlockingStatPanel()) return;
+        if (IsTownBlockingStatPanel()) return;
         Toggle();
     }
 
     public bool IsVisible => isVisible;
+
+    private bool IsTownBlockingStatPanel()
+    {
+        DungeonManager dm = FindFirstObjectByType<DungeonManager>();
+        return dm != null && !dm.IsDungeonMode;
+    }
 
     public void Toggle()
     {

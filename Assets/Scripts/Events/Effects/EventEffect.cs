@@ -243,6 +243,21 @@ public class StairsMoveEffect : EventEffect
     public override string GetEffectText() => "";
 }
 
+[Serializable]
+public class ReturnToTownEffect : EventEffect
+{
+    public DungeonManager dungeonManager;
+
+    public override void Execute()
+    {
+        if (dungeonManager == null) return;
+        Debug.Log("[ReturnToTownEffect] 마을로 복귀");
+        dungeonManager.ReturnToTownSpawn();
+    }
+
+    public override string GetEffectText() => "";
+}
+
 /// <summary>
 /// 이벤트에서 전투를 시작한다.
 /// EventChoice.directEffects 또는 EventResult.effects에서 사용.

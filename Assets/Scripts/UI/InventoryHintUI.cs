@@ -41,6 +41,14 @@ public class InventoryHintUI : MonoBehaviour
 
     private void Update()
     {
+        if (ShouldHideInCurrentMode())
+        {
+            SetHintVisible(false);
+            return;
+        }
+
+        SetHintVisible(true);
+
         bool inventoryVisible = InventoryUI.Instance != null && InventoryUI.Instance.canvasGroup != null && InventoryUI.Instance.canvasGroup.alpha > 0.01f;
         bool statVisible = StatPanelUI.Instance != null && StatPanelUI.Instance.IsVisible;
 
@@ -77,6 +85,13 @@ public class InventoryHintUI : MonoBehaviour
     private void RefreshHint()
     {
         if (hintText == null) return;
+        if (ShouldHideInCurrentMode())
+        {
+            SetHintVisible(false);
+            return;
+        }
+
+        SetHintVisible(true);
 
         bool inventoryVisible = InventoryUI.Instance != null && InventoryUI.Instance.canvasGroup != null
             && InventoryUI.Instance.canvasGroup.alpha > 0.01f && InventoryUI.Instance.canvasGroup.blocksRaycasts;
@@ -100,5 +115,18 @@ public class InventoryHintUI : MonoBehaviour
         GameObject go = new GameObject("StatPanelUI", typeof(RectTransform), typeof(CanvasGroup), typeof(UnityEngine.UI.Image), typeof(StatPanelUI));
         go.transform.SetParent(canvas.transform, false);
         go.transform.SetAsFirstSibling();
+    }
+
+    private bool ShouldHideInCurrentMode()
+    {
+        DungeonManager dm = FindFirstObjectByType<DungeonManager>();
+        return dm != null && !dm.IsDungeonMode;
+    }
+
+    private void SetHintVisible(bool visible)
+    {
+        if (hintText == null) return;
+        if (hintText.gameObject.activeSelf != visible)
+            hintText.gameObject.SetActive(visible);
     }
 }

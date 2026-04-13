@@ -33,6 +33,7 @@ public class ObjectEventTrigger : MonoBehaviour
     public DungeonManager       dungeonManager;
     public DungeonObjectSpawner dungeonObjectSpawner;
 
+    private bool ignoreNextStartTileTrigger;
 
     // ─────────────────────────────────────────────────────
     private void Start()
@@ -60,6 +61,7 @@ public class ObjectEventTrigger : MonoBehaviour
     {
         // 층 전환 시 열려 있던 팝업 닫기
         eventPopup?.Close();
+        ignoreNextStartTileTrigger = true;
     }
 
     private void OnTileEntered(Vector2Int tilePos)
@@ -68,6 +70,12 @@ public class ObjectEventTrigger : MonoBehaviour
 
         TileData tile = dungeonManager.GetTile(tilePos.x, tilePos.y);
         if (tile == null) return;
+
+        if (ignoreNextStartTileTrigger && tilePos == dungeonManager.StartPosition)
+        {
+            ignoreNextStartTileTrigger = false;
+            return;
+        }
 
         // ── 우선순위 1: 이벤트 SO ──────────────────────────
         if (tile.eventSO != null)
@@ -138,30 +146,28 @@ public class ObjectEventTrigger : MonoBehaviour
 
     private void HandleStairs(Vector2Int tilePos, DungeonObjectData obj, bool isDown)
     {
-        if (!isDown && dungeonManager.CurrentFloorIndex <= 0)
-        {
-            Debug.Log("[ObjectEventTrigger] 최상위 층 — 더 올라갈 수 없습니다.");
-            return;
-        }
+        bool isTownReturnStairs = !isDown && dungeonManager.CurrentFloorIndex <= 0;
 
         Debug.Log($"[ObjectEventTrigger] 계단 ({(isDown ? "하행" : "상행")}): {obj.displayName} ({tilePos})");
 
-        // eventOverride 우선 사용, null이면 팩토리 자동 생성
-        EventData data = obj.eventOverride != null
-            ? obj.eventOverride
-            : EventData.FromStairs(obj, isDown, dungeonManager, movementSystem);
-        // desc가 비어 있으면 DungeonObjectData.description 폴백
-        ApplyDescFallback(data, obj);
-        // ── 계단 전용 이미지 하드코딩 ────────────────────────
-        // obj.sprite(100x100 아이콘)와 별도로 팝업용 고해상도 이미지(480x200)를 사용한다.
-        // 이미지 경로: Assets/Resources/Sprites/Object_StairsDown.png
-        //              Assets/Resources/Sprites/Object_StairsUp.png
-        // * Resources 폴더에 없으면 obj.sprite(아이콘)를 그대로 사용한다.
-        // * 계단 외 오브젝트에는 적용하지 않는다 (보물상자 등은 별도 처리 예정).
-        string spriteName = isDown ? "Object_StairsDown" : "Object_StairsUp";
-        Sprite loadedSprite = Resources.Load<Sprite>($"Sprites/{spriteName}");
-        if (loadedSprite != null) data.image = loadedSprite;
-        // ─────────────────────────────────────────────────
+        EventData data;
+        if (isTownReturnStairs)
+        {
+            data = EventData.FromTownReturnStairs(dungeonManager);
+        }
+        else
+        {
+            // eventOverride 우선 사용, null이면 팩토리 자동 생성
+            data = obj.eventOverride != null
+                ? obj.eventOverride
+                : EventData.FromStairs(obj, isDown, dungeonManager, movementSystem);
+            ApplyDescFallback(data, obj);
+
+            string spriteName = isDown ? "Object_StairsDown" : "Object_StairsUp";
+            Sprite loadedSprite = Resources.Load<Sprite>($"Sprites/{spriteName}");
+            if (loadedSprite != null) data.image = loadedSprite;
+        }
+
         eventPopup?.Open(data);
     }
 
