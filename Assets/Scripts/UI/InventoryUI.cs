@@ -491,7 +491,15 @@ public class InventoryUI : MonoBehaviour
         click.callback.AddListener(evt =>
         {
             var pe = evt as PointerEventData;
-            if (pe != null && pe.button == PointerEventData.InputButton.Right)
+            if (pe == null) return;
+
+            if (pe.button == PointerEventData.InputButton.Left && pe.clickCount >= 2)
+            {
+                OnDoubleClick(cs, ci);
+                return;
+            }
+
+            if (pe.button == PointerEventData.InputButton.Right)
             {
                 if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
                     OnCtrlRightClick(cs, ci);
@@ -500,6 +508,42 @@ public class InventoryUI : MonoBehaviour
             }
         });
         trigger.triggers.Add(click);
+    }
+
+    private void OnDoubleClick(InventorySlot slot, int index)
+    {
+        if (slot == null || slot.item == null) return;
+
+        ConsumableItemData consumable = slot.item as ConsumableItemData;
+        if (consumable == null) return;
+
+        CharacterStats stats = CharacterStats.Instance;
+        DungeonManager dungeonManager = FindFirstObjectByType<DungeonManager>();
+
+        switch (consumable.effectType)
+        {
+            case ConsumableEffectType.HealHP:
+                if (stats == null) return;
+                float before = stats.currentHP;
+                stats.Heal(consumable.effectValue);
+                float healed = stats.currentHP - before;
+                if (healed <= 0f)
+                {
+                    FloatingTextUI.Instance?.Show("체력이 이미 가득 찼습니다.", FloatingTextUI.ColorFail);
+                    return;
+                }
+                Inventory.Instance?.ConsumeOneAt(index);
+                tooltipUI?.Hide();
+                FloatingTextUI.Instance?.Show($"체력 {Mathf.FloorToInt(healed)} 회복", FloatingTextUI.ColorAcquire);
+                break;
+
+            case ConsumableEffectType.EscapeToTown:
+                if (dungeonManager == null) return;
+                Inventory.Instance?.ConsumeOneAt(index);
+                tooltipUI?.Hide();
+                dungeonManager.ReturnToTownSpawn();
+                break;
+        }
     }
 
     private void OnRightClick(InventorySlot slot, int index)

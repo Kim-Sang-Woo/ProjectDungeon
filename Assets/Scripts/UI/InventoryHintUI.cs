@@ -11,8 +11,9 @@ using UnityEngine.UI;
 
 public class InventoryHintUI : MonoBehaviour
 {
+    public static InventoryHintUI Instance { get; private set; }
     private const string DefaultHintClosed = "가방 [Tab], 능력치 [C]";
-    private const string DefaultHintInventoryOpen = "가방 닫기 [Tab], 능력치 [C], 장착/해제 [우클릭], 버리기 [Ctrl+우클릭]";
+    private const string DefaultHintInventoryOpen = "가방 닫기 [Tab], 능력치 [C], 장착/해제 [우클릭], 사용 [더블 클릭], 버리기 [Ctrl+우클릭]";
     private const string DefaultHintStatOpen = "가방 [Tab], 능력치 닫기 [C]";
 
     [Tooltip("힌트 텍스트 오브젝트")]
@@ -20,9 +21,12 @@ public class InventoryHintUI : MonoBehaviour
 
     private bool isInventoryOpen;
     private bool isStatOpen;
+    private bool wasHiddenByMode;
 
     private void Awake()
     {
+        if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+        Instance = this;
         EnsureStatPanelExists();
     }
 
@@ -43,6 +47,7 @@ public class InventoryHintUI : MonoBehaviour
     {
         if (ShouldHideInCurrentMode())
         {
+            wasHiddenByMode = true;
             SetHintVisible(false);
             return;
         }
@@ -52,8 +57,9 @@ public class InventoryHintUI : MonoBehaviour
         bool inventoryVisible = InventoryUI.Instance != null && InventoryUI.Instance.canvasGroup != null && InventoryUI.Instance.canvasGroup.alpha > 0.01f;
         bool statVisible = StatPanelUI.Instance != null && StatPanelUI.Instance.IsVisible;
 
-        if (inventoryVisible != isInventoryOpen || statVisible != isStatOpen)
+        if (wasHiddenByMode || inventoryVisible != isInventoryOpen || statVisible != isStatOpen)
         {
+            wasHiddenByMode = false;
             isInventoryOpen = inventoryVisible;
             isStatOpen = statVisible;
             RefreshHint();
@@ -79,6 +85,28 @@ public class InventoryHintUI : MonoBehaviour
     {
         isStatOpen = isOpen;
         if (isOpen) isInventoryOpen = false;
+        RefreshHint();
+    }
+
+    public void ForceRefreshForCurrentMode()
+    {
+        wasHiddenByMode = false;
+        isInventoryOpen = InventoryUI.Instance != null && InventoryUI.Instance.canvasGroup != null
+            && InventoryUI.Instance.canvasGroup.alpha > 0.01f && InventoryUI.Instance.canvasGroup.blocksRaycasts;
+        isStatOpen = StatPanelUI.Instance != null && StatPanelUI.Instance.IsVisible;
+        RefreshHint();
+    }
+
+    public void ForceShowForDungeon()
+    {
+        wasHiddenByMode = false;
+        isInventoryOpen = InventoryUI.Instance != null && InventoryUI.Instance.canvasGroup != null
+            && InventoryUI.Instance.canvasGroup.alpha > 0.01f && InventoryUI.Instance.canvasGroup.blocksRaycasts;
+        isStatOpen = StatPanelUI.Instance != null && StatPanelUI.Instance.IsVisible;
+
+        if (hintText != null)
+            hintText.gameObject.SetActive(true);
+
         RefreshHint();
     }
 

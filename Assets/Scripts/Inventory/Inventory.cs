@@ -153,6 +153,21 @@ public class Inventory : MonoBehaviour
         NotifyWeightChanged();
     }
 
+    public void ConsumeOneAt(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= Slots.Count) return;
+
+        InventorySlot slot = Slots[slotIndex];
+        if (slot == null || slot.item == null) return;
+
+        slot.quantity -= 1;
+        if (slot.quantity <= 0)
+            Slots.RemoveAt(slotIndex);
+
+        OnInventoryChanged?.Invoke();
+        NotifyWeightChanged();
+    }
+
     /// <summary>
     /// 슬롯 위치 변경 (드래그 정렬용)
     /// - 대상이 아이템 슬롯이면 서로 스왑

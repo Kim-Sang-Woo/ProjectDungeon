@@ -258,8 +258,10 @@ public class TownScreenUI : MonoBehaviour
         overlayImage.color = new Color(0f, 0f, 0f, 0.18f);
         overlayImage.raycastTarget = false;
 
-        RectTransform topBar = CreateRect("TopBar", root, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -48f), Vector2.zero);
+        RectTransform topBar = CreateRect("TopBar", root, new Vector2(0f, 1f), new Vector2(1f, 1f), Vector2.zero, Vector2.zero);
         topBar.pivot = new Vector2(0.5f, 1f);
+        topBar.sizeDelta = new Vector2(0f, 50f);
+        topBar.anchoredPosition = Vector2.zero;
         Image topBarImage = topBar.gameObject.AddComponent<Image>();
         topBarImage.color = colorTopBar;
 

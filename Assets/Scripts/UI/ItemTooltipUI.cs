@@ -146,9 +146,15 @@ public class ItemTooltipUI : MonoBehaviour
         if (tooltipStatsText != null)
         {
             EquipData e = item as EquipData;
-            bool hasStats = e != null && e.HasStats;
+            ConsumableItemData c = item as ConsumableItemData;
+            bool hasStats = (e != null && e.HasStats) || c != null;
             tooltipStatsText.gameObject.SetActive(hasStats);
-            tooltipStatsText.text = hasStats ? BuildEquipStats(e) : "";
+            if (e != null && e.HasStats)
+                tooltipStatsText.text = BuildEquipStats(e);
+            else if (c != null)
+                tooltipStatsText.text = BuildConsumableStats(c);
+            else
+                tooltipStatsText.text = "";
         }
 
         if (tooltipDescText != null)
@@ -172,6 +178,21 @@ public class ItemTooltipUI : MonoBehaviour
             string qty = item.isStackable && slot.quantity > 1 ? $"(x{slot.quantity})" : "";
             int finalPrice = item.price * Mathf.Max(1, priceMultiplier);
             tooltipPriceWeightText.text = $"{finalPrice}G{qty}  [{item.weight:F1} Kg]";
+        }
+    }
+
+    private string BuildConsumableStats(ConsumableItemData item)
+    {
+        if (item == null) return "";
+
+        switch (item.effectType)
+        {
+            case ConsumableEffectType.HealHP:
+                return $"체력 {Mathf.FloorToInt(item.effectValue)}회복";
+            case ConsumableEffectType.EscapeToTown:
+                return "마을로 탈출";
+            default:
+                return "";
         }
     }
 

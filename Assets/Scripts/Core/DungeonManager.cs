@@ -240,6 +240,9 @@ public class DungeonManager : MonoBehaviour
         cameraZoom?.ResetToDefaultSize(true);
         SetDungeonVisualsActive(true);
         CurrentPresentationMode = DungeonPresentationMode.Dungeon;
+        InventoryHintUI.Instance?.ForceShowForDungeon();
+        if (InventoryHintUI.Instance == null)
+            FindFirstObjectByType<InventoryHintUI>(FindObjectsInactive.Include)?.ForceShowForDungeon();
 
         if (movementSystem != null)
             movementSystem.UnlockAllInputLocks();
