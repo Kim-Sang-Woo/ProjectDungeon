@@ -50,6 +50,9 @@ public class RewardManager : MonoBehaviour
 
         var results = RollEntries(data);
         Debug.Log($"[RewardManager] Open: {data.rewardId} — {results.Count}개 아이템 지급");
+        if (results == null || results.Count == 0)
+            return;
+
         popupUI.Show(data.displayName, results);
     }
 
@@ -77,6 +80,9 @@ public class RewardManager : MonoBehaviour
                 if (merged.Count >= 16) break;
             }
         }
+
+        if (merged == null || merged.Count == 0)
+            return;
 
         popupUI.Show(displayName, merged);
     }

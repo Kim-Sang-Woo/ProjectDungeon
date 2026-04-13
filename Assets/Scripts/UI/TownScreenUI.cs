@@ -286,8 +286,10 @@ public class TownScreenUI : MonoBehaviour
 
         BuildGoldDisplay(topBar);
 
-        RectTransform enterWrap = CreateRect("EnterButtonWrap", root, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-300f, 32f), new Vector2(-32f, 96f));
-        enterWrap.pivot = new Vector2(1f, 0f);
+        RectTransform enterWrap = CreateRect("EnterButtonWrap", root, new Vector2(0.5f, 0.33f), new Vector2(0.5f, 0.33f), Vector2.zero, Vector2.zero);
+        enterWrap.pivot = new Vector2(0.5f, 0.5f);
+        enterWrap.sizeDelta = new Vector2(268f, 64f);
+        enterWrap.anchoredPosition = Vector2.zero;
         enterDungeonWrap = enterWrap;
 
         Image enterFrame = enterWrap.gameObject.AddComponent<Image>();

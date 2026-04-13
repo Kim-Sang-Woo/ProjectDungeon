@@ -32,6 +32,7 @@ public class MovementSystem : MonoBehaviour
 
     private int   inputLockCount = 0;
     private float baseSpeed;          // 감속 전 원본 속도
+    private bool  wasWeightSlowActive;
 
     private List<Vector2Int> currentPath;
     private Coroutine moveCoroutine;
@@ -63,7 +64,10 @@ public class MovementSystem : MonoBehaviour
 
         // 무게 변화 구독
         if (Inventory.Instance != null)
+        {
             Inventory.Instance.OnWeightChanged += ApplyWeightSlow;
+            ApplyWeightSlow(Inventory.Instance.IsOverweightSlow);
+        }
     }
 
     private void OnDestroy()
@@ -82,10 +86,17 @@ public class MovementSystem : MonoBehaviour
     /// </summary>
     public void ApplyWeightSlow(bool isSlow)
     {
-        if (isSlow)
-            moveSpeed = baseSpeed * (1f - Inventory.Instance.weightSlowRatio);
+        Inventory inventory = Inventory.Instance;
+
+        if (isSlow && inventory != null)
+            moveSpeed = baseSpeed * (1f - inventory.weightSlowRatio);
         else
             moveSpeed = baseSpeed;
+
+        if (isSlow && !wasWeightSlowActive)
+            FloatingTextUI.Instance?.ShowSlowDown();
+
+        wasWeightSlowActive = isSlow;
 
         if (debugLogs) Debug.Log($"[MovementSystem] 이동속도 변경: {moveSpeed:F2} (감속:{isSlow})");
     }

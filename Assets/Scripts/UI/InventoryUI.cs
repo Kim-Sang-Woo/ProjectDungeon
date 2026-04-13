@@ -847,8 +847,13 @@ public class InventoryUI : MonoBehaviour
         if (rootCanvas == null) rootCanvas = GetComponentInParent<Canvas>();
         if (rootCanvas == null) return;
 
-        GameObject go = new GameObject("DraggedItemIcon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+        GameObject go = new GameObject("DraggedItemIcon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Canvas));
         go.transform.SetParent(rootCanvas.transform, false);
+        go.transform.SetAsLastSibling();
+
+        Canvas dragCanvas = go.GetComponent<Canvas>();
+        dragCanvas.overrideSorting = true;
+        dragCanvas.sortingOrder = 6000;
 
         dragIconRect = go.GetComponent<RectTransform>();
         dragIconRect.sizeDelta = new Vector2(slotSize, slotSize);
