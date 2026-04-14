@@ -78,6 +78,8 @@ public class DungeonManager : MonoBehaviour
 
     public event Action<int> OnFloorChanged;
 
+    public bool LastFloorSpawnAtStart { get; private set; }
+
     private Dictionary<int, FloorCache> floorCacheMap = new Dictionary<int, FloorCache>();
 
     private class FloorCache
@@ -145,6 +147,7 @@ public class DungeonManager : MonoBehaviour
     private void GenerateAndLoadFloor(int floorIndex, bool spawnAtStart)
     {
         CurrentFloorIndex = floorIndex;
+        LastFloorSpawnAtStart = spawnAtStart;
 
         if (floorCacheMap.ContainsKey(floorIndex))
         {

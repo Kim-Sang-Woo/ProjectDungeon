@@ -112,6 +112,15 @@ public class FogOfWar : MonoBehaviour
 
     private void OnPlayerMoved(Vector2Int pos)
     {
+        if (!isInitialized) return;
+
+        // 층 전환 중에는 DungeonManager.CurrentFloorIndex가 이미 새 층으로 바뀌지만
+        // currentCachedFloor는 아직 이전 층을 가리킬 수 있다.
+        // 이 타이밍의 OnTileEntered를 그대로 반영하면 이전 층 fogMap이 새 층 위치 기준으로 덮여써져
+        // 층별 안개 캐시가 섞일 수 있으므로 무시한다.
+        if (dungeonManager != null && currentCachedFloor != dungeonManager.CurrentFloorIndex)
+            return;
+
         if (pos == lastPlayerTile) return;
         UpdateFog(pos);
     }

@@ -61,7 +61,10 @@ public class ObjectEventTrigger : MonoBehaviour
     {
         // 층 전환 시 열려 있던 팝업 닫기
         eventPopup?.Close();
-        ignoreNextStartTileTrigger = true;
+
+        // 시작 계단 위에 스폰된 경우에만 첫 진입 1회를 무시한다.
+        // 이전 층 출구 쪽에 스폰된 경우까지 무시하면 실제 상행 계단 진입이 씹힐 수 있다.
+        ignoreNextStartTileTrigger = dungeonManager != null && dungeonManager.LastFloorSpawnAtStart;
     }
 
     private void OnTileEntered(Vector2Int tilePos)
