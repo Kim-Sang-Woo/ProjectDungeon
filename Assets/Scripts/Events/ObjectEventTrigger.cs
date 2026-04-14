@@ -71,6 +71,12 @@ public class ObjectEventTrigger : MonoBehaviour
     {
         if (dungeonManager == null) return;
 
+        // 층 로드 직후 시작 계단 스폰을 무시하기 위한 플래그는
+        // 실제로 시작칸을 벗어나는 순간 해제되어야 한다.
+        // 그렇지 않으면 첫 재진입까지 먹어버려 상층 계단 이벤트가 누락된다.
+        if (ignoreNextStartTileTrigger && tilePos != dungeonManager.StartPosition)
+            ignoreNextStartTileTrigger = false;
+
         TileData tile = dungeonManager.GetTile(tilePos.x, tilePos.y);
         if (tile == null) return;
 

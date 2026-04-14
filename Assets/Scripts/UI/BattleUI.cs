@@ -1755,6 +1755,8 @@ public class BattleUI : MonoBehaviour
 
     private IEnumerator CoFlashMonster(int targetIndex, Image bg)
     {
+        if (bg == null) yield break;
+
         flashingMonsterIndices.Add(targetIndex);
 
         Color flash = new Color(1f, 0.55f, 0.55f, 0.45f);
@@ -1762,6 +1764,8 @@ public class BattleUI : MonoBehaviour
         yield return new WaitForSeconds(monsterHitFlashDuration);
 
         flashingMonsterIndices.Remove(targetIndex);
+
+        if (bg == null) yield break;
 
         if (targetIndex == selectedTargetIndex)
             bg.color = colorMonsterSelected;
